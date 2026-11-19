@@ -1,0 +1,127 @@
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --bg: #0a0a0f;
+  --surface: #141419;
+  --surface-elevated: #1c1c24;
+  --text: #e0e0e6;
+  --text-secondary: #808090;
+  --accent: #ff8c00;
+  --accent-light: #ffaa33;
+  --danger: #ff3344;
+  --track: #2a2a35;
+  --border: #222230;
+  --waveform: #00ff88;
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  background-color: var(--bg);
+  color: var(--text);
+  font-family: 'Manrope', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  touch-action: manipulation;
+}
+
+.font-mono-tabular {
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Touch-optimized range input */
+.echo-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 44px;
+  background: transparent;
+  cursor: pointer;
+  margin: 0;
+  touch-action: pan-y;
+}
+
+.echo-slider:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+.echo-slider::-webkit-slider-runnable-track {
+  height: 8px;
+  border-radius: 4px;
+  background: linear-gradient(
+    to right,
+    var(--accent) 0%,
+    var(--accent-light) var(--slider-pct, 0%),
+    var(--track) var(--slider-pct, 0%),
+    var(--track) 100%
+  );
+}
+
+.echo-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 9999px;
+  background: var(--accent);
+  border: 2px solid var(--bg);
+  margin-top: -7px;
+  box-shadow: 0 0 0 1px rgba(255, 140, 0, 0.35);
+  transition: transform 0.12s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.echo-slider:active::-webkit-slider-thumb {
+  transform: scale(1.15);
+  background: var(--accent-light);
+}
+
+.echo-slider::-moz-range-track {
+  height: 8px;
+  border-radius: 4px;
+  background: var(--track);
+}
+
+.echo-slider::-moz-range-progress {
+  height: 8px;
+  border-radius: 4px;
+  background: linear-gradient(to right, var(--accent), var(--accent-light));
+}
+
+.echo-slider::-moz-range-thumb {
+  width: 22px;
+  height: 22px;
+  border-radius: 9999px;
+  background: var(--accent);
+  border: 2px solid var(--bg);
+}
+
+/* Subtle dark scrollbar for scrollable panels */
+.echo-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+
+.echo-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.echo-scroll::-webkit-scrollbar-thumb {
+  background: #2a2a35;
+  border-radius: 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

@@ -1,0 +1,3294 @@
+# Echo Engine — Complete Technical Specification Package
+
+Below is a full set of technical specification documents for a working first version. Each document is self-contained but designed to fit together. I've consolidated into **7 documents** covering product requirements, architecture, API, Sound Lab UI (mobile-first), presets, and implementation details.
+
+---
+
+## Document 1: `README.md`
+
+```markdown
+# ECHO ENGINE — Procedural Audio for Shadowflap
+
+> An autonomous procedural audio environment that makes Shadowflap feel
+> alive, mysterious and unpredictable.
+
+**Status:** Specification v1.0  
+**Target:** Modern browsers (desktop + mobile)  
+**Technology:** Vanilla JavaScript, Web Audio API  
+**Dependencies:** Zero external dependencies
+
+---
+
+## Document Index
+
+| Document | Purpose |
+|----------|---------|
+| [PRD.md](PRD.md) | Product Requirements Document — vision, features, success criteria |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | System architecture, module breakdown, audio graph, data flow |
+| [API-SPEC.md](API-SPEC.md) | Public JavaScript API, event system, state model |
+| [SOUND-LAB-SPEC.md](SOUND-LAB-SPEC.md) | Mobile-first Sound Lab UI/UX specification |
+| [PRESET-SPEC.md](PRESET-SPEC.md) | Preset format, serialization, sharing |
+| [IMPLEMENTATION-GUIDE.md](IMPLEMENTATION-GUIDE.md) | Technical implementation details, code structure, Web Audio specifics |
+
+---
+
+## Quick Start (Conceptual)
+
+```js
+import { EchoEngine } from './echo-engine.js';
+
+const engine = new EchoEngine({ seed: 42 });
+await engine.start();
+
+// Respond to gameplay
+engine.setState('tension', 0.7);
+engine.triggerEvent('portal');
+```
+
+## Repository Structure (Planned)
+
+```
+echo-engine/
+├── README.md
+├── PRD.md
+├── ARCHITECTURE.md
+├── API-SPEC.md
+├── SOUND-LAB-SPEC.md
+├── PRESET-SPEC.md
+├── IMPLEMENTATION-GUIDE.md
+│
+├── src/
+│   ├── echo-engine.js          # Core engine (ES module)
+│   ├── core/
+│   │   ├── audio-graph.js      # Web Audio node graph builder
+│   │   ├── modulation.js       # LFOs, random walks, mod matrix
+│   │   ├── rng.js              # Seeded PRNG
+│   │   ├── atmosphere.js       # Atmosphere state controller
+│   │   └── events.js           # Event engine
+│   ├── effects/
+│   │   ├── filter.js           # Filter module
+│   │   ├── delay.js            # Feedback delay
+│   │   └── reverb.js           # Procedural reverb
+│   ├── presets/
+│   │   ├── preset-manager.js   # Save/load/serialize presets
+│   │   └── defaults.json       # Built-in preset library
+│   └── utils/
+│       └── audio-utils.js      # Shared utilities
+│
+├── lab/                        # Sound Laboratory (standalone app)
+│   ├── index.html
+│   ├── css/
+│   │   └── lab.css             # Mobile-first styles
+│   └── js/
+│       ├── app.js              # App bootstrap
+│       ├── ui.js               # UI controller
+│       ├── visualizer.js       # Waveform/spectrum canvas
+│       └── event-simulator.js  # Gameplay event simulator
+│
+└── dist/
+    └── echo-engine.min.js      # Built bundle (future)
+```
+
+## Versioning
+
+- **v1.0** — First working version (this specification)
+- Follows semver. Engine API changes are breaking → major bump.
+- Preset format versioned independently in the preset JSON.
+```
+
+---
+
+## Document 2: `PRD.md`
+
+```markdown
+# ECHO ENGINE — Product Requirements Document
+
+**Version:** 1.0  
+**Parent Project:** Shadowflap  
+**Status:** Approved for implementation  
+**Last Updated:** 2025
+
+---
+
+## 1. Executive Summary
+
+Echo Engine is a reusable, zero-dependency procedural audio engine that
+generates continuously evolving atmospheric soundscapes in the browser.
+Its first consumer is the game Shadowflap, but it is designed to be
+independent and portable.
+
+The engine replaces conventional soundtracks with an autonomous audio
+system that reacts to gameplay, varies across sessions, and creates a
+sense of living, unpredictable machinery.
+
+---
+
+## 2. Problem Statement
+
+Shadowflap currently uses a basic shifting-tone audio system. It lacks:
+
+- Deep variation across sessions
+- Meaningful response to gameplay events
+- Controlled yet unpredictable sonic evolution
+- A reusable architecture
+- A sound-design workflow (currently requires code changes to experiment)
+
+## 3. Solution
+
+Echo Engine provides:
+
+1. **Real-time procedural audio generation** via the Web Audio API
+2. **Continuous autonomous modulation** for evolving, non-repetitive sound
+3. **Gameplay event and state integration** through a minimal API
+4. **Seeded session variation** for distinct experiences per playthrough
+5. **A Sound Laboratory** — a standalone mobile-first web app for sound
+   design, experimentation, testing and preset management
+
+## 4. Target Users
+
+| User | Need |
+|------|------|
+| **Sound designer / developer** | Experiment with parameters, save presets, iterate rapidly |
+| **Shadowflap player** | Immersive, evolving, responsive audio experience |
+| **Game developer** | Integrate adaptive audio without understanding audio internals |
+
+## 5. Core Features (v1.0)
+
+### 5.1 Audio Generation
+
+- **3 oscillator voices** (selectable waveform: sine, triangle, sawtooth, square)
+  - Independent frequency, detune, gain
+  - Independent LFO modulation
+- **1 noise generator** (white / pink noise)
+  - Bandpass-filtered for texture control
+  - Independent gain and modulation
+- **1 main filter** (lowpass / highpass / bandpass / notch / peaking)
+  - Modulatable cutoff frequency and Q (resonance)
+- **Feedback delay** effect
+- **Procedural reverb** (generated impulse response)
+- **Stereo panning** with LFO modulation
+- **Master volume** control
+
+### 5.2 Modulation System
+
+- **3 LFOs** with independent rate (0.01–20 Hz), depth, waveform,
+  and routing targets
+- **3 random walks** with configurable step size, range, and target
+- **Modulation targets:** oscillator frequency, filter cutoff, filter Q,
+  stereo pan, master gain, LFO rate (meta-modulation)
+- All modulation runs continuously and autonomously
+
+### 5.3 Atmosphere Controller
+
+High-level macro controls that internally adjust multiple parameters:
+
+| Macro | Range | Effect |
+|-------|-------|--------|
+| **Tension** | 0.0 – 1.0 | Increases dissonance, filter cutoff movement, LFO speeds |
+| **Instability** | 0.0 – 1.0 | Increases random walk activity, parameter jitter, gain fluctuation |
+| **Complexity** | 0.0 – 1.0 | Increases oscillator layering, filter modulation depth, effect mix |
+
+### 5.4 Seeded Randomization
+
+- Mulberry32 seeded PRNG
+- Configurable seed value
+- Same seed → same initial parameters + modulation trajectory
+- New seed → new sonic identity
+- Seed displayed and editable in Sound Lab
+
+### 5.5 Event System
+
+Discrete gameplay events trigger transient audio responses:
+
+| Event | Audio Response (initial design) |
+|-------|----------------------------------|
+| `newGame` | Generate new sonic identity (new seed if auto-seeded) |
+| `portal` | Frequency sweep up, resonance spike, brief spectral shift |
+| `danger` | Tension increase, dissonance layer, faster LFOs |
+| `pass` | Gradual tension decrease, smooth return to baseline |
+| `collision` | Brief distortion / dissonance burst |
+| `nearMiss` | Subtle dissonance pulse, brief instability spike |
+| `gameOver` | Sustained low tone, slow filter descent, reverb swell |
+
+### 5.6 State-Based Modulation
+
+Continuous gameplay state values (0.0–1.0) modulate the soundscape:
+
+| State | Effect |
+|-------|--------|
+| `tension` | Maps to atmosphere tension |
+| `progress` | Maps to complexity + slight instability increase |
+| `proximity` | Maps to tension + filter cutoff adjustment |
+
+### 5.7 Preset System
+
+- Save current engine state as JSON preset
+- Load preset to restore engine state
+- Built-in default presets
+- Export preset as JSON file
+- Import preset from JSON file
+- Preset sharing via URL hash (Sound Lab)
+
+### 5.8 Sound Laboratory (Standalone App)
+
+See [SOUND-LAB-SPEC.md](SOUND-LAB-SPEC.md) for full UI specification.
+
+Core capabilities:
+- Start / stop audio
+- Real-time parameter controls (all engine parameters)
+- Visual waveform + spectrum display
+- Atmosphere macro controls
+- Gameplay event simulation
+- Preset save / load / export / import
+- Seed display and control
+- Mobile-first touch-optimized interface
+
+---
+
+## 6. Non-Goals (v1.0)
+
+- No AudioWorklet processing
+- No sample library playback (planned for v1.1)
+- No multi-channel / spatial audio (stereo only)
+- No recording / export of audio
+- No MIDI support
+- No networking
+- No shadowflap game integration (Phase 3)
+- No desktop-native UI (web only)
+
+---
+
+## 7. Constraints
+
+| Constraint | Requirement |
+|-----------|-------------|
+| **Browser support** | Chrome 90+, Firefox 90+, Safari 15+, Edge 90+ |
+| **Mobile** | iOS 15+, Android Chrome 90+ |
+| **Bundle size** | Engine < 30 KB gzipped (no deps) |
+| **Latency** | Audio startup < 200ms after user gesture |
+| **CPU** | < 5% CPU on mid-range mobile (measured during steady playback) |
+| **Memory** | < 20 MB total audio graph memory |
+| **AudioContext** | Must handle mobile autoplay restrictions, suspend/resume |
+| **Offline** | Sound Lab must work offline after first load (PWA-ready) |
+
+---
+
+## 8. Success Criteria
+
+The system is successful when:
+
+1. ✅ It generates an evolving atmospheric soundscape with no obvious repetition
+   over 10+ minutes of continuous playback
+2. ✅ Two sessions with different seeds sound distinctly different
+3. ✅ Two sessions with the same seed are reproducible
+4. ✅ Gameplay events produce audible, appropriate audio responses
+5. ✅ The Sound Lab allows parameter experimentation on a mobile phone
+6. ✅ Presets can be saved, loaded and shared
+7. ✅ Engine integrates with Shadowflap via its public API only
+8. ✅ Meets performance constraints on target devices
+
+---
+
+## 9. Roadmap
+
+| Phase | Scope | Status |
+|-------|-------|--------|
+| **Phase 1** | Core engine — generators, modulation, atmosphere | **← v1.0** |
+| **Phase 2** | Sound Laboratory — full UI + presets | **← v1.0** |
+| **Phase 3** | Shadowflap integration | v1.1 |
+| **Phase 4** | Sample library, advanced modulation, refinement | v1.2 |
+
+---
+
+## 10. Open Questions
+
+| # | Question | Decision |
+|---|----------|----------|
+| 1 | Should samples be included in v1.0? | **No** — procedural only for v1 |
+| 2 | Should the Sound Lab be a PWA? | **Yes** — PWA-ready with manifest + service worker |
+| 3 | Preset sharing mechanism? | **URL hash** + file export/import |
+| 4 | Maximum simultaneous oscillators? | **3** for v1.0 |
+| 5 | Reverb impulse response generation? | **Procedural** (noise + exponential decay) |
+| 6 | Should the engine support AudioWorklet? | **No** — only if perf demands in future |
+| 7 | Dark theme only for Sound Lab? | **Yes** — matches Shadowflap aesthetic |
+```
+
+---
+
+## Document 3: `ARCHITECTURE.md`
+
+```markdown
+# ECHO ENGINE — System Architecture
+
+**Version:** 1.0
+
+---
+
+## 1. High-Level Architecture
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                     ECHO ENGINE                         │
+│                                                         │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐             │
+│  │  Public   │  │  Preset  │  │  Seeded  │             │
+│  │   API     │  │  Manager │  │   RNG    │             │
+│  └────┬─────┘  └────┬─────┘  └────┬─────┘             │
+│       │              │              │                    │
+│  ┌────▼──────────────▼──────────────▼─────┐            │
+│  │          Atmosphere Controller          │            │
+│  │  (tension, instability, complexity)     │            │
+│  └────────────────┬────────────────────────┘            │
+│                   │                                      │
+│  ┌────────────────▼────────────────────────┐            │
+│  │          Modulation Engine               │            │
+│  │  (LFOs, Random Walks, Mod Matrix)       │            │
+│  └────────────────┬────────────────────────┘            │
+│                   │                                      │
+│  ┌────────────────▼────────────────────────┐            │
+│  │           Audio Graph                    │            │
+│  │  Sources → Filter → Effects → Output    │            │
+│  └────────────────┬────────────────────────┘            │
+│                   │                                      │
+│  ┌────────────────▼────────────────────────┐            │
+│  │          Event Engine                    │            │
+│  │  (gameplay event responses)             │            │
+│  └─────────────────────────────────────────┘            │
+│                                                         │
+└─────────────────────────────────────────────────────────┘
+                          │
+                    Public API
+                          │
+          ┌───────────────┴───────────────┐
+          │                               │
+    ┌─────▼─────┐                 ┌───────▼───────┐
+    │  SHADOWFLAP│                 │  SOUND LAB     │
+    │   (game)   │                 │  (standalone)  │
+    └────────────┘                 └────────────────┘
+```
+
+---
+
+## 2. Module Breakdown
+
+### 2.1 EchoEngine (core/echo-engine.js)
+
+The main entry point. Orchestrates all subsystems.
+
+**Responsibilities:**
+- Initialize and manage AudioContext lifecycle
+- Create and connect the audio graph
+- Coordinate modulation, atmosphere, and events
+- Expose the public API
+- Manage engine state (idle, starting, playing, suspended)
+
+**State machine:**
+```
+IDLE → STARTING → PLAYING → SUSPENDING → SUSPENDED
+         │                      │              │
+         └──── RESUMING ←──────┘──────────────┘
+                     │
+                   PLAYING
+```
+
+### 2.2 AudioGraph (core/audio-graph.js)
+
+Builds and manages the Web Audio node graph.
+
+**Responsibilities:**
+- Create all AudioNodes (oscillators, filters, effects, gains)
+- Connect nodes in the correct topology
+- Expose node references for modulation and control
+- Handle node lifecycle (create once, reuse)
+
+**Node inventory (fixed at creation):**
+- 3 × OscillatorNode
+- 3 × GainNode (oscillator gains)
+- 1 × BufferSourceNode (noise)
+- 1 × GainNode (noise gain)
+- 1 × BiquadFilterNode (noise filter)
+- 1 × BiquadFilterNode (main filter)
+- 1 × GainNode (post-filter gain)
+- 1 × DelayNode + GainNode (feedback delay)
+- 1 × ConvolverNode (reverb) + GainNode (reverb mix)
+- 1 × StereoPannerNode
+- 1 × GainNode (master volume)
+- 3 × OscillatorNode (LFOs) + 3 × GainNode (LFO depth)
+- 3 × AudioParam targets for random walks (via `setTargetAtTime`)
+- 1 × AnalyserNode (for visualization)
+
+**Audio graph signal flow:**
+
+```
+Oscillator 1 ─→ [Gain 1] ─────────────────┐
+Oscillator 2 ─→ [Gain 2] ─────────────────┤
+Oscillator 3 ─→ [Gain 3] ─────────────────┤
+                                            ├─→ [Mix Sum] ─→ [Main Filter] ─→ [Post Gain] ─→ [Delay] ─→ [Reverb] ─→ [Panner] ─→ [Master Gain] ─→ [Analyser] ─→ [Destination]
+Noise ─→ [Noise Filter] ─→ [Noise Gain] ──┘                                                                        ↑
+                                                                                                                    │
+                                                                                                              (wet mix)
+LFO 1 ─→ [LFO Depth 1] ─→ targets: osc1.freq, osc2.freq, osc3.freq
+LFO 2 ─→ [LFO Depth 2] ─→ targets: filter.freq, filter.Q
+LFO 3 ─→ [LFO Depth 3] ─→ targets: panner.pan, delay.time
+```
+
+**Note:** Delay and reverb are parallel to serial (delay feeds into reverb).
+Reverb also receives a direct dry signal. Wet/dry mix controlled per-effect.
+
+### 2.3 ModulationEngine (core/modulation.js)
+
+Manages all modulation sources and routing.
+
+**Components:**
+
+#### LFOs (3 instances)
+Each LFO is implemented as a native `OscillatorNode` → `GainNode` (depth) → target `AudioParam`:
+- Efficient: runs on audio thread, zero JS overhead per frame
+- Rate: 0.01–20 Hz
+- Depth: target-specific units
+- Waveform: sine, triangle, sawtooth, square
+- Target: any routable AudioParam
+
+#### Random Walks (3 instances)
+JavaScript-driven parameter evolution using `setTargetAtTime`:
+- Current value tracks a random walk between [min, max]
+- Updated at configurable interval (default: 100ms)
+- Step size configurable
+- Smooth transitions via `setTargetAtTime(value, currentTime, timeConstant)`
+
+**Random Walk update loop:**
+```js
+updateWalk(walk) {
+  const step = (rng() * 2 - 1) * walk.stepSize;
+  walk.current = clamp(walk.current + step, walk.min, walk.max);
+  walk.targetParam.setTargetAtTime(walk.current, ctx.currentTime, walk.smoothing);
+}
+```
+
+#### Modulation Matrix
+A routing table that maps modulation sources to targets:
+```js
+{
+  source: 'lfo1',
+  target: 'osc1.frequency',
+  depth: 20,
+  offset: 120  // base value
+}
+```
+
+### 2.4 AtmosphereController (core/atmosphere.js)
+
+Maps high-level atmosphere macros to detailed parameter adjustments.
+
+**Inputs:** tension, instability, complexity (each 0.0–1.0)
+
+**Mapping table:**
+```
+tension (0-1) →
+  osc1.detune:       0 → 50 cents (dissonance)
+  osc2.detune:       0 → -30 cents
+  osc3.frequency:    base → base * (1 + tension * 0.3)
+  lfo1.rate:         0.1 → 2.0 Hz
+  lfo2.depth:        200 → 1500 Hz
+  filter.Q:          base → base + tension * 15
+  noise.gain:        0.05 → 0.3
+  delay.feedback:    0.3 → 0.7
+
+instability (0-1) →
+  randomWalk1.stepSize:  0.5 → 3.0
+  randomWalk2.stepSize:  0.5 → 3.0
+  randomWalk3.stepSize:  0.3 → 2.0
+  lfo1.rate:             base * (1 + instability * 0.5)
+  masterGain modulation: depth 0 → 0.15
+  randomWalk1.interval:  200 → 50ms
+
+complexity (0-1) →
+  osc1.gain:     0 → 0.4
+  osc2.gain:     0 → 0.35
+  osc3.gain:     0 → 0.3
+  noise.gain:    base * (0.5 + complexity)
+  delay.mix:     0 → 0.5
+  reverb.mix:    0.1 → 0.4
+  filter.freq modulation depth: 200 → 1200 Hz
+```
+
+**Processing:** When atmosphere values change, the controller interpolates
+all mapped parameter targets using `linearRampToValueAtTime` for smooth
+transitions.
+
+### 2.5 EventEngine (core/events.js)
+
+Handles discrete gameplay events and produces transient audio responses.
+
+**Event → Audio Response mapping:**
+
+Each event is defined as a sequence of parameter automations over time:
+
+```js
+const eventResponses = {
+  portal: {
+    duration: 2.0,  // seconds
+    automations: [
+      { param: 'filter.frequency', from: 400, to: 4000, time: 0.5, curve: 'exponential' },
+      { param: 'filter.frequency', from: 4000, to: 400, time: 1.5, curve: 'exponential' },
+      { param: 'filter.Q', from: 8, to: 25, time: 0.3, curve: 'linear' },
+      { param: 'filter.Q', from: 25, to: 8, time: 1.7, curve: 'linear' },
+      { param: 'osc1.detune', from: 0, to: 100, time: 1.0, curve: 'linear' },
+      { param: 'osc1.detune', from: 100, to: 0, time: 1.0, curve: 'linear' },
+      { param: 'delay.feedback', from: 0.4, to: 0.8, time: 0.3, curve: 'linear' },
+      { param: 'delay.feedback', from: 0.8, to: 0.4, time: 1.7, curve: 'linear' },
+    ]
+  },
+  collision: {
+    duration: 0.5,
+    automations: [
+      { param: 'noise.gain', from: 0.1, to: 0.6, time: 0.05, curve: 'linear' },
+      { param: 'noise.gain', from: 0.6, to: 0.1, time: 0.45, curve: 'exponential' },
+      { param: 'filter.Q', from: 8, to: 40, time: 0.05, curve: 'linear' },
+      { param: 'filter.Q', from: 40, to: 8, time: 0.45, curve: 'exponential' },
+      { param: 'masterGain', from: 1.0, to: 0.7, time: 0.02, curve: 'linear' },
+      { param: 'masterGain', from: 0.7, to: 1.0, time: 0.48, curve: 'exponential' },
+    ]
+  },
+  // ... other events
+};
+```
+
+**Execution:** Events schedule automations via Web Audio `setValueAtTime`
+/ `linearRampToValueAtTime` / `exponentialRampToValueAtTime` — all
+happening on the audio thread with zero JavaScript frame dependency.
+
+**Concurrent events:** Multiple events can fire simultaneously.
+Each event's automations are scheduled independently. However, conflicting
+parameter changes are resolved by last-write-wins.
+
+### 2.6 SeededRNG (core/rng.js)
+
+Mulberry32 pseudorandom number generator.
+
+```js
+function createRNG(seed) {
+  let state = seed | 0;
+  return {
+    next() {
+      state = (state + 0x6D2B79F5) | 0;
+      let t = Math.imul(state ^ (state >>> 15), 1 | state);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    },
+    reset(newSeed) {
+      state = (newSeed !== undefined ? newSeed : seed) | 0;
+    }
+  };
+}
+```
+
+**Properties:**
+- Fast (no dependencies)
+- Deterministic from seed
+- Distribution sufficient for audio parameter variation
+- `next()` returns float in [0.0, 1.0)
+
+### 2.7 PresetManager (presets/preset-manager.js)
+
+Handles preset serialization, deserialization, and storage.
+
+**Storage backends (in priority order):**
+1. localStorage (primary — fast, synchronous)
+2. File system (export/import)
+3. URL hash (sharing)
+
+See [PRESET-SPEC.md](PRESET-SPEC.md) for the full preset format.
+
+---
+
+## 3. Data Flow
+
+### 3.1 Initialization Flow
+
+```
+User gesture → new EchoEngine(config)
+  → Create RNG(seed)
+  → Create AudioContext
+  → Build AudioGraph (create all nodes, connect)
+  → Initialize ModulationEngine (create LFOs, walks)
+  → Initialize AtmosphereController (apply initial macros)
+  → Initialize EventEngine (load event definitions)
+  → Apply initial preset / default parameters
+  → Resume AudioContext
+  → Start modulation loops (random walk intervals)
+  → State = PLAYING
+```
+
+### 3.2 Runtime Data Flow
+
+```
+                    ┌──────────────┐
+                    │   User /     │
+                    │   Game /     │
+                    │   Sound Lab  │
+                    └──────┬───────┘
+                           │
+              setState() / triggerEvent()
+                           │
+                    ┌──────▼───────┐
+                    │   Public API │
+                    └──────┬───────┘
+                           │
+              ┌────────────┼────────────┐
+              │            │            │
+        ┌─────▼─────┐ ┌───▼────┐ ┌────▼─────┐
+        │ Atmosphere│ │ Event  │ │ Direct   │
+        │ Controller│ │ Engine │ │ Param    │
+        └─────┬─────┘ └───┬────┘ └────┬─────┘
+              │            │            │
+              └────────────┼────────────┘
+                           │
+                    ┌──────▼───────┐
+                    │  Modulation  │
+                    │  Engine      │
+                    │  (LFOs +     │
+                    │   Walks)     │
+                    └──────┬───────┘
+                           │
+                    ┌──────▼───────┐
+                    │  Audio Graph │
+                    │  (Web Audio) │
+                    └──────┬───────┘
+                           │
+                    ┌──────▼───────┐
+                    │  Speakers /  │
+                    │  Headphones  │
+                    └──────────────┘
+```
+
+### 3.3 Session Startup Flow
+
+```
+newGame(seed?) →
+  → If seed provided: RNG.reset(seed)
+  → If auto-seed: seed = Date.now(), RNG.reset(seed)
+  → Re-randomize initial parameter values using RNG
+  → Reset all modulation walks to new starting positions
+  → Reset atmosphere macros to default
+  → Clear any active event automations
+  → Start generation
+```
+
+---
+
+## 4. AudioContext Lifecycle (Mobile-Critical)
+
+```
+┌─────────────────────────────────────────────────────┐
+│                 AudioContext States                   │
+│                                                      │
+│  "suspended" ──(user gesture)──→ "running"           │
+│       ↑                             │                │
+│       │                             │                │
+│       ├──(tab hidden)──────────────┤                │
+│       │                             │                │
+│       └──(tab visible + resume)────┘                │
+│                                                      │
+│  "closed" (engine.destroy())                         │
+└─────────────────────────────────────────────────────┘
+```
+
+**Critical mobile considerations:**
+1. AudioContext must be created and resumed within a user gesture handler
+2. On iOS, `ctx.resume()` must be called in the gesture handler
+3. `visibilitychange` event → suspend/resume AudioContext
+4. All AudioNodes are created once and reused (no runtime node creation)
+5. Random walk intervals use `setInterval` — cleared on suspend, restarted on resume
+
+---
+
+## 5. Performance Architecture
+
+### 5.1 Zero-Frame Audio
+
+All time-based audio parameter changes use Web Audio's native scheduling:
+- `setValueAtTime()`
+- `linearRampToValueAtTime()`
+- `exponentialRampToValueAtTime()`
+- `setTargetAtTime()`
+
+These execute on the audio thread and are unaffected by JavaScript frame drops.
+
+### 5.2 Limited JavaScript Timers
+
+| Timer | Interval | Purpose | Cleared on |
+|-------|----------|---------|------------|
+| Random Walk 1 | 50–200ms | Update walk 1 value | Suspend / destroy |
+| Random Walk 2 | 50–200ms | Update walk 2 value | Suspend / destroy |
+| Random Walk 3 | 50–200ms | Update walk 3 value | Suspend / destroy |
+
+**No `requestAnimationFrame` in the engine.** rAF is used only by the
+Sound Lab visualizer (optional, can be disabled).
+
+### 5.3 Node Reuse
+
+All AudioNodes are created during initialization and never destroyed or
+recreated during runtime. Parameter changes modify existing nodes.
+
+### 5.4 Analyser for Visualization (Optional)
+
+A single `AnalyserNode` is included in the graph for the Sound Lab
+visualizer. It can be disconnected in production if visualization is
+not needed (saves a small amount of CPU).
+
+---
+
+## 6. Threading Model
+
+- **Audio thread:** Web Audio API native scheduling (LFOs, ramps, timing)
+- **Main thread (JS):** Random walk updates (3 setInterval timers),
+  event processing, API calls
+- **No Web Workers or AudioWorklets in v1.0**
+```
+
+---
+
+## Document 4: `API-SPEC.md`
+
+```markdown
+# ECHO ENGINE — Public JavaScript API Specification
+
+**Version:** 1.0
+
+---
+
+## 1. Module Import
+
+```js
+import { EchoEngine } from './echo-engine.js';
+```
+
+The engine is a single ES module export. No global side effects on import.
+
+---
+
+## 2. Constructor
+
+```js
+const engine = new EchoEngine(config);
+```
+
+### Config Object
+
+```ts
+interface EchoEngineConfig {
+  seed?: number;             // PRNG seed (default: Date.now())
+  preset?: Preset;           // Initial preset (default: built-in)
+  volume?: number;           // Master volume 0.0–1.0 (default: 0.7)
+  autoStart?: boolean;       // Auto-start on construction (default: false)
+  analyser?: boolean;        // Include AnalyserNode (default: true)
+}
+```
+
+### Example
+
+```js
+const engine = new EchoEngine({
+  seed: 42,
+  volume: 0.8,
+  autoStart: false
+});
+```
+
+---
+
+## 3. Lifecycle Methods
+
+### `async start(): Promise<void>`
+
+Starts or resumes audio generation.
+
+- Creates AudioContext if needed (must be called from user gesture)
+- Resumes AudioContext
+- Starts all oscillators and modulation
+- Resolves when audio is running
+- Idempotent (safe to call multiple times)
+
+### `stop(): void`
+
+Stops audio generation.
+
+- Suspends AudioContext (does not close)
+- All oscillators continue in suspended state
+- Can resume with `start()`
+
+### `destroy(): void`
+
+Permanently destroys the engine.
+
+- Closes AudioContext
+- Clears all timers
+- Disconnects all nodes
+- Engine instance is unusable after this
+
+### `getState(): EngineState`
+
+Returns current engine state.
+
+```ts
+type EngineState = 'idle' | 'starting' | 'playing' | 'suspended' | 'destroyed';
+```
+
+---
+
+## 4. Atmosphere Controls
+
+### `setAtmosphere(tension: number, instability: number, complexity: number): void`
+
+Set all three atmosphere macros simultaneously.
+
+```js
+engine.setAtmosphere(0.5, 0.3, 0.7);
+```
+
+### `setTension(value: number): void`
+
+Set tension (0.0–1.0).
+
+### `setInstability(value: number): void`
+
+Set instability (0.0–1.0).
+
+### `setComplexity(value: number): void`
+
+Set complexity (0.0–1.0).
+
+### `getAtmosphere(): { tension: number, instability: number, complexity: number }`
+
+Get current atmosphere values.
+
+---
+
+## 5. Gameplay State (Continuous)
+
+### `setState(key: string, value: number): void`
+
+Set a named continuous gameplay state.
+
+**Recognized state keys:**
+
+| Key | Range | Effect |
+|-----|-------|--------|
+| `tension` | 0.0–1.0 | Alias for `setTension()` |
+| `progress` | 0.0–1.0 | Increases complexity + slight instability |
+| `proximity` | 0.0–1.0 | Increases tension + filter cutoff |
+| `danger` | 0.0–1.0 | Increases tension + instability |
+
+```js
+engine.setState('progress', 0.6);
+engine.setState('proximity', 0.3);
+```
+
+### `getState(key: string): number`
+
+Get current value of a gameplay state.
+
+---
+
+## 6. Event Triggers (Discrete)
+
+### `triggerEvent(eventName: string, options?: EventOptions): void`
+
+Trigger a discrete gameplay event.
+
+```js
+engine.triggerEvent('portal');
+engine.triggerEvent('collision', { intensity: 0.8 });
+```
+
+### EventOptions
+
+```ts
+interface EventOptions {
+  intensity?: number;  // 0.0–1.0, scales the event's audio response
+}
+```
+
+### Supported Events (v1.0)
+
+| Event Name | Description |
+|-----------|-------------|
+| `newGame` | New session, re-seed and reset |
+| `portal` | Portal interaction — spectral sweep |
+| `danger` | Danger approaching — tension increase |
+| `pass` | Obstacle passed — tension release |
+| `collision` | Collision — dissonance burst |
+| `nearMiss` | Near miss — subtle instability |
+| `gameOver` | Game over — atmospheric transition |
+
+---
+
+## 7. Direct Parameter Access
+
+### `setParam(paramPath: string, value: number): void`
+
+Set a specific audio parameter directly.
+
+**Parameter paths:**
+
+| Path | Type | Range | Unit |
+|------|------|-------|------|
+| `osc1.frequency` | float | 20–2000 | Hz |
+| `osc2.frequency` | float | 20–2000 | Hz |
+| `osc3.frequency` | float | 20–2000 | Hz |
+| `osc1.detune` | float | -1200–1200 | cents |
+| `osc2.detune` | float | -1200–1200 | cents |
+| `osc3.detune` | float | -1200–1200 | cents |
+| `osc1.gain` | float | 0.0–1.0 | amplitude |
+| `osc2.gain` | float | 0.0–1.0 | amplitude |
+| `osc3.gain` | float | 0.0–1.0 | amplitude |
+| `noise.gain` | float | 0.0–1.0 | amplitude |
+| `noise.filterFreq` | float | 50–8000 | Hz |
+| `filter.frequency` | float | 20–12000 | Hz |
+| `filter.Q` | float | 0.1–40 | — |
+| `delay.time` | float | 0.01–2.0 | seconds |
+| `delay.feedback` | float | 0.0–0.95 | — |
+| `delay.mix` | float | 0.0–1.0 | wet/dry |
+| `reverb.mix` | float | 0.0–1.0 | wet/dry |
+| `panner.pan` | float | -1.0–1.0 | stereo |
+| `masterGain` | float | 0.0–1.0 | amplitude |
+| `lfo1.rate` | float | 0.01–20 | Hz |
+| `lfo1.depth` | float | (target-specific) | — |
+| `lfo2.rate` | float | 0.01–20 | Hz |
+| `lfo2.depth` | float | (target-specific) | — |
+| `lfo3.rate` | float | 0.01–20 | Hz |
+| `lfo3.depth` | float | (target-specific) | — |
+
+```js
+engine.setParam('filter.frequency', 2000);
+engine.setParam('osc1.detune', 30);
+```
+
+### `getParam(paramPath: string): number`
+
+Get current value of a parameter.
+
+### `setParamType(paramPath: string, type: string): void`
+
+Set a parameter type (for enumerated params).
+
+| Path | Allowed Types |
+|------|---------------|
+| `osc1.waveform` | `sine`, `triangle`, `sawtooth`, `square` |
+| `osc2.waveform` | `sine`, `triangle`, `sawtooth`, `square` |
+| `osc3.waveform` | `sine`, `triangle`, `sawtooth`, `square` |
+| `noise.type` | `white`, `pink` |
+| `filter.type` | `lowpass`, `highpass`, `bandpass`, `notch`, `peaking` |
+| `lfo1.waveform` | `sine`, `triangle`, `sawtooth`, `square` |
+| `lfo2.waveform` | `sine`, `triangle`, `sawtooth`, `square` |
+| `lfo3.waveform` | `sine`, `triangle`, `sawtooth`, `square` |
+
+---
+
+## 8. Preset System
+
+### `savePreset(name: string): Preset`
+
+Save current engine state as a preset.
+
+```js
+const preset = engine.savePreset('Dark Machine');
+```
+
+### `loadPreset(preset: Preset): void`
+
+Load a preset, restoring all parameters.
+
+```js
+engine.loadPreset(savedPreset);
+```
+
+### `getPreset(): Preset`
+
+Get current state as a preset object.
+
+### `getBuiltInPresets(): Preset[]`
+
+Get array of built-in presets.
+
+---
+
+## 9. Seed & Randomization
+
+### `getSeed(): number`
+
+Get the current session seed.
+
+### `setSeed(seed: number): void`
+
+Change the seed (does not reset session).
+
+### `reseed(seed?: number): void`
+
+Re-seed and re-randomize the current session.
+If no seed provided, uses `Date.now()`.
+
+---
+
+## 10. Volume
+
+### `setVolume(value: number): void`
+
+Set master volume (0.0–1.0).
+
+### `getVolume(): number`
+
+Get master volume.
+
+---
+
+## 11. Utility
+
+### `getAnalyser(): AnalyserNode | null`
+
+Get the AnalyserNode for visualization (if enabled).
+
+### `getAudioContext(): AudioContext`
+
+Get the underlying AudioContext (for advanced use / visualization).
+
+### `isRunning(): boolean`
+
+Check if audio is actively generating.
+
+---
+
+## 12. Events (Optional Callback)
+
+### `onEvent(callback: (eventName: string, data: object) => void): void`
+
+Register a callback for engine events (primarily for debugging/logging).
+
+**Engine-emitted events:**
+- `started` — Audio generation started
+- `stopped` — Audio generation stopped
+- `stateChange` — Engine state changed
+- `eventTriggered` — Gameplay event triggered
+- `presetLoaded` — Preset loaded
+- `seedChanged` — Seed changed
+
+---
+
+## 13. TypeScript Types (Reference)
+
+```ts
+interface Preset {
+  version: string;
+  name: string;
+  seed: number;
+  sources: {
+    osc1: OscillatorConfig;
+    osc2: OscillatorConfig;
+    osc3: OscillatorConfig;
+    noise: NoiseConfig;
+  };
+  filter: FilterConfig;
+  modulation: {
+    lfo1: LFOConfig;
+    lfo2: LFOConfig;
+    lfo3: LFOConfig;
+    randomWalk1: RandomWalkConfig;
+    randomWalk2: RandomWalkConfig;
+    randomWalk3: RandomWalkConfig;
+  };
+  effects: {
+    delay: DelayConfig;
+    reverb: ReverbConfig;
+  };
+  atmosphere: {
+    tension: number;
+    instability: number;
+    complexity: number;
+  };
+  masterGain: number;
+  pan: number;
+}
+```
+```
+
+---
+
+## Document 5: `SOUND-LAB-SPEC.md`
+
+```markdown
+# ECHO ENGINE SOUND LABORATORY — UI/UX Specification
+
+**Version:** 1.0  
+**Design principle:** Mobile-first, dark theme, touch-optimized  
+**Platform:** Progressive Web App (PWA-ready)
+
+---
+
+## 1. Overview
+
+The Sound Lab is a standalone single-page web application for designing,
+experimenting with, testing, and saving Echo Engine soundscapes. It runs
+independently of Shadowflap.
+
+**Primary target:** Mobile phones (portrait orientation)  
+**Secondary target:** Tablets, desktop browsers  
+**Aesthetic:** Dark, minimal, matching Shadowflap's atmosphere
+
+---
+
+## 2. Layout Structure (Mobile Portrait)
+
+```
+┌─────────────────────────────────┐
+│          TOP BAR                │
+│  ☠ ECHO LAB    🎲 Seed: 42    │  56px height
+├─────────────────────────────────┤
+│                                 │
+│        VISUALIZER AREA          │  ~25vh
+│    ┌───────────────────────┐    │
+│    │  Waveform + Spectrum  │    │  Canvas
+│    │  (dark background,    │    │
+│    │   green/amber lines)  │    │
+│    └───────────────────────┘    │
+│                                 │
+├─────────────────────────────────┤
+│          STATUS BAR             │
+│  ● PLAYING    Vol: 70%   ⚡     │  40px height
+├─────────────────────────────────┤
+│                                 │
+│     CONTEXT CONTROLS AREA       │  Scrollable
+│   (changes per active tab)      │  ~40vh
+│                                 │
+│   ┌─────────────────────────┐  │
+│   │ Parameter control rows  │  │
+│   │ with touch sliders      │  │
+│   │ and value readouts      │  │
+│   └─────────────────────────┘  │
+│                                 │
+│   ┌─────────────────────────┐  │
+│   │ More parameters...      │  │
+│   │ (scroll down)           │  │
+│   └─────────────────────────┘  │
+│                                 │
+├─────────────────────────────────┤
+│         ACTION BUTTONS          │  Row of buttons
+│  [▶ Play] [⏹ Stop] [🎲 New]  │  48px height
+│  [💾 Save] [📂 Load] [🔗]    │
+├─────────────────────────────────┤
+│         BOTTOM NAVIGATION       │  56px height
+│  ┌────┬────┬────┬────┬────┐   │
+│  │ ⚙  │ 🎛 │ 🔊 │ 🎮 │ 💾 │   │
+│  │GEN │MOD │SRC │EVT │PRST│   │
+│  └────┴────┴────┴────┴────┘   │
+└─────────────────────────────────┘
+```
+
+---
+
+## 3. Color Palette
+
+| Element | Color | Hex |
+|---------|-------|-----|
+| Background | Near black | `#0a0a0f` |
+| Surface / cards | Dark gray | `#141419` |
+| Surface elevated | Slightly lighter | `#1c1c24` |
+| Primary text | Light gray | `#e0e0e6` |
+| Secondary text | Muted gray | `#808090` |
+| Accent / active | Amber/orange | `#ff8c00` |
+| Accent hover | Bright amber | `#ffaa33` |
+| Visualizer waveform | Green | `#00ff88` |
+| Visualizer spectrum | Amber | `#ff8c00` |
+| Danger / stop | Red | `#ff3344` |
+| Slider track | Dark | `#2a2a35` |
+| Slider fill | Accent gradient | `#ff8c00` → `#ffaa33` |
+| Slider thumb | Accent | `#ff8c00` |
+| Border | Subtle | `#222230` |
+
+---
+
+## 4. Typography
+
+| Element | Font | Size | Weight |
+|---------|------|------|--------|
+| Title | System UI stack | 18px | 700 |
+| Section headers | System UI stack | 14px | 600 |
+| Parameter labels | System UI stack | 13px | 500 |
+| Values / readouts | Monospace | 13px | 400 |
+| Buttons | System UI stack | 14px | 600 |
+| Nav icons + labels | System UI stack | 10px | 500 |
+
+**Font stack:**
+```css
+font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+             Oxygen, Ubuntu, Cantarell, sans-serif;
+```
+
+---
+
+## 5. Component Specifications
+
+### 5.1 Touch Slider
+
+The primary control element. Used for all numeric parameters.
+
+```
+┌─────────────────────────────────────┐
+│  Filter Cutoff              2400 Hz │  ← Label (left) + Value (right)
+│  ┌────────────────────────────────┐ │
+│  │████████████████░░░░░░░░░░░░░░░░│ │  ← Track (8px height)
+│  └────────────────────────────────┘ │     Touch target: 44px height
+│         ○                           │  ← Thumb (20px visible, 44px hit)
+└─────────────────────────────────────┘
+```
+
+**Specs:**
+- Track height: 8px, rounded (4px radius)
+- Thumb: 20px visible circle, 44px touch area
+- Fill: gradient from accent-dark to accent-light
+- Value updates in real-time during drag
+- Snap to steps if step size specified (e.g., 1 Hz for frequency)
+- Haptic feedback on value change (10ms vibration, if supported)
+
+### 5.2 Toggle / Dropdown
+
+Used for enumerated parameters (waveform, filter type).
+
+**Toggle (binary):**
+```
+┌─────────────────────────────┐
+│  Reverb              [ ON ] │  ← Pill toggle
+└─────────────────────────────┘
+```
+
+**Dropdown (multi-option):**
+```
+┌─────────────────────────────┐
+│  Osc 1 Waveform             │
+│  ┌────────────────────────┐ │
+│  │  [sine|triangle|saw~|sq]│ │  ← Segmented control
+│  └────────────────────────┘ │
+└─────────────────────────────┘
+```
+
+### 5.3 Action Button
+
+```
+┌──────────────────────┐
+│     ▶  PLAY          │  ← 48px height, full-width or half-width
+└──────────────────────┘
+```
+
+**States:**
+- Default: surface background, border
+- Pressed: accent background, white text
+- Disabled: 40% opacity
+- Active (e.g., playing): accent background
+
+### 5.4 Seed Display
+
+```
+┌─────────────────────────────┐
+│  🎲 Seed                    │
+│  ┌────────────────────────┐ │
+│  │  42               [↻]  │ │  ← Number input + randomize button
+│  └────────────────────────┘ │
+└─────────────────────────────┘
+```
+
+### 5.5 Visualizer
+
+A single `<canvas>` element showing two views:
+
+**Mode 1: Waveform (default)**
+- Oscilloscope-style time-domain display
+- Green line on dark background
+- 1px line width, smooth rendering
+
+**Mode 2: Spectrum**
+- Frequency-domain bar chart
+- Amber/orange gradient bars
+- Logarithmic frequency scale
+
+Toggle between modes via a small button overlay.
+
+**Performance:**
+- Uses `requestAnimationFrame`
+- 30fps target on mobile (60fps on desktop)
+- Canvas sized to device pixel ratio
+- AnalyserNode `fftSize`: 2048 (waveform), 1024 (spectrum)
+
+### 5.6 Parameter Row
+
+A reusable row component for a parameter + slider:
+
+```html
+<div class="param-row">
+  <label class="param-label">Filter Cutoff</label>
+  <span class="param-value">2400 Hz</span>
+  <input type="range" class="param-slider"
+         min="20" max="12000" value="2400" step="1">
+</div>
+```
+
+---
+
+## 6. Tab Content Specifications
+
+### Tab 1: GEN (Generation / Atmosphere)
+
+Master controls and atmosphere macros.
+
+**Parameters:**
+| Parameter | Control | Range | Default |
+|-----------|---------|-------|---------|
+| Master Volume | Slider | 0.0–1.0 | 0.7 |
+| Tension | Slider | 0.0–1.0 | 0.3 |
+| Instability | Slider | 0.0–1.0 | 0.4 |
+| Complexity | Slider | 0.0–1.0 | 0.5 |
+| Seed | Number input | integer | random |
+
+### Tab 2: MOD (Modulation)
+
+LFO and random walk controls.
+
+**LFO 1:**
+| Parameter | Control | Range | Default |
+|-----------|---------|-------|---------|
+| LFO 1 Waveform | Segmented | sine/tri/saw/sq | sine |
+| LFO 1 Rate | Slider | 0.01–20 Hz | 0.1 |
+| LFO 1 Depth | Slider | 0.0–100% | 30% |
+| LFO 1 Target | Dropdown | osc1.freq / osc2.freq / osc3.freq / filter.freq / filter.Q / pan / delay.time | osc1.freq |
+
+**LFO 2:** (same structure, default: filter.freq)
+**LFO 3:** (same structure, default: pan)
+
+**Random Walk 1:**
+| Parameter | Control | Range | Default |
+|-----------|---------|-------|---------|
+| RW1 Target | Dropdown | filter.Q / filter.freq / masterGain / delay.feedback | filter.Q |
+| RW1 Range Min | Slider | target-specific | 2 |
+| RW1 Range Max | Slider | target-specific | 20 |
+| RW1 Step Size | Slider | 0.1–5.0 | 1.0 |
+| RW1 Speed | Slider | 50–500ms interval | 100ms |
+
+**Random Walk 2 & 3:** (same structure)
+
+### Tab 3: SRC (Sources)
+
+Oscillator and noise controls.
+
+**Oscillator 1:**
+| Parameter | Control | Range | Default |
+|-----------|---------|-------|---------|
+| Osc 1 Waveform | Segmented | sine/tri/saw/sq | sawtooth |
+| Osc 1 Frequency | Slider | 20–2000 Hz | 120 |
+| Osc 1 Detune | Slider | -1200–1200 cents | 0 |
+| Osc 1 Gain | Slider | 0.0–1.0 | 0.3 |
+
+**Oscillator 2:** (default: triangle, 180Hz, -5 cents, 0.2)
+**Oscillator 3:** (default: sine, 240Hz, +8 cents, 0.25)
+
+**Noise:**
+| Parameter | Control | Range | Default |
+|-----------|---------|-------|---------|
+| Noise Type | Segmented | white / pink | pink |
+| Noise Gain | Slider | 0.0–1.0 | 0.15 |
+| Noise Filter Freq | Slider | 50–8000 Hz | 800 |
+| Noise Filter Type | Segmented | lowpass / bandpass / highpass | bandpass |
+
+### Tab 4: EVT (Events)
+
+Gameplay event simulation buttons.
+
+```
+┌─────────────────────────────────────┐
+│  SIMULATE GAMEPLAY EVENTS           │
+│                                     │
+│  [🌀 New Game]  [🔮 Portal]        │
+│  [⚠️ Danger]    [✅ Pass]           │
+│  [💥 Collision] [💨 Near Miss]      │
+│  [💀 Game Over]                     │
+│                                     │
+│  ───────────────────────────────    │
+│                                     │
+│  CONTINUOUS STATES                  │
+│                                     │
+│  Progress          ████████░░  80%  │
+│  Proximity         ████░░░░░░  40%  │
+│  Danger            █░░░░░░░░░  10%  │
+│                                     │
+└─────────────────────────────────────┘
+```
+
+**Event buttons:** 2-column grid, 48px height each
+**State sliders:** Same touch slider component
+**Feedback:** Brief visual pulse on button tap + haptic
+
+### Tab 5: PRST (Presets)
+
+Preset management interface.
+
+```
+┌─────────────────────────────────────┐
+│  PRESETS                            │
+│                                     │
+│  ┌─────────────────────────────┐   │
+│  │  💾 Save Current State      │   │
+│  │  [name input]  [SAVE]       │   │
+│  └─────────────────────────────┘   │
+│                                     │
+│  SAVED PRESETS                      │
+│  ┌─────────────────────────────┐   │
+│  │  Dark Machine       [LOAD]  │   │
+│  │  Echo Chamber       [LOAD]  │   │
+│  │  Unstable Signal    [LOAD]  │   │
+│  └─────────────────────────────┘   │
+│                                     │
+│  BUILT-IN PRESETS                   │
+│  ┌─────────────────────────────┐   │
+│  │  Deep Drone         [LOAD]  │   │
+│  │  Tension Builder    [LOAD]  │   │
+│  │  Serene Void        [LOAD]  │   │
+│  └─────────────────────────────┘   │
+│                                     │
+│  ───────────────────────────────    │
+│  [📤 Export]  [📥 Import]  [🔗]   │
+│  ───────────────────────────────    │
+│                                     │
+└─────────────────────────────────────┘
+```
+
+**Export:** Downloads JSON file
+**Import:** File picker → parse JSON → confirm → load
+**Share link:** Copies URL with preset data in hash
+
+---
+
+## 7. Interaction Patterns
+
+### 7.1 Audio Unlock
+
+On first user interaction (tap anywhere):
+1. Display overlay: "Tap to enable audio"
+2. On tap: create AudioContext, resume, dismiss overlay
+3. Subsequent taps: no action needed
+
+### 7.2 Parameter Adjustment
+
+1. Touch and drag slider
+2. Value updates in real-time
+3. Engine parameter updates in real-time (via `setParam()`)
+4. Haptic feedback every 50ms during drag (if supported)
+
+### 7.3 Event Trigger
+
+1. Tap event button
+2. Button briefly flashes accent color
+3. Engine event triggered
+4. Visualizer responds (if audio changes)
+
+### 7.4 Preset Save
+
+1. Tap "Save Current State"
+2. Input field appears (focused, keyboard open)
+3. Type name, tap Save
+4. Preset added to list, confirmation toast shown
+
+### 7.5 Preset Load
+
+1. Tap Load on a preset
+2. All sliders animate to preset values (500ms transition)
+3. Engine parameters update
+4. Confirmation toast shown
+
+---
+
+## 8. Responsive Breakpoints
+
+| Breakpoint | Layout | Target |
+|-----------|--------|--------|
+| < 640px | Mobile portrait (default) | Phones |
+| 640–1024px | Tablet — 2-column controls | Tablets |
+| > 1024px | Desktop — 3-column + wider visualizer | Desktop |
+
+### Mobile (default)
+- Single column
+- Bottom tab navigation
+- Full-width controls
+- 100vh height, no page scroll (inner scroll for controls)
+
+### Tablet
+- Two-column parameter layout
+- Tab navigation moves to left sidebar
+- Visualizer spans full width
+
+### Desktop
+- Three-column layout
+- Left: navigation, Center: visualizer + primary controls, Right: detail controls
+- Keyboard shortcuts for common actions
+
+---
+
+## 9. Accessibility
+
+| Requirement | Implementation |
+|------------|----------------|
+| Touch targets | Minimum 44×44px |
+| Contrast | All text ≥ 4.5:1 contrast ratio |
+| Screen reader | ARIA labels on all controls |
+| Focus | Visible focus indicators (accent outline) |
+| Reduced motion | Disable visualizer animation, slider transitions |
+| Keyboard | All controls navigable and operable |
+
+---
+
+## 10. PWA Configuration
+
+```json
+{
+  "name": "Echo Engine Sound Lab",
+  "short_name": "Echo Lab",
+  "start_url": "/lab/",
+  "display": "standalone",
+  "background_color": "#0a0a0f",
+  "theme_color": "#ff8c00",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}
+```
+
+Service worker caches:
+- index.html
+- lab.css
+- All JS modules
+- Default presets
+
+---
+
+## 11. Visual Hierarchy Summary
+
+```
+Priority 1 (always visible):   Visualizer, Play/Stop, Tab nav
+Priority 2 (always accessible): Master volume, atmosphere macros
+Priority 3 (per tab):          Detailed parameter controls
+Priority 4 (tab):              Preset management
+```
+```
+
+---
+
+## Document 6: `PRESET-SPEC.md`
+
+```markdown
+# ECHO ENGINE — Preset Format Specification
+
+**Version:** 1.0  
+**Format:** JSON  
+**Encoding:** UTF-8
+
+---
+
+## 1. Overview
+
+A preset captures the complete state of the Echo Engine at a moment in
+time. Presets can be saved, loaded, exported, imported, and shared.
+
+---
+
+## 2. Preset Schema
+
+```json
+{
+  "$schema": "https://echo-engine.dev/schema/preset-v1.json",
+  "version": "1.0",
+  "name": "Dark Machine",
+  "seed": 42,
+  "description": "A deep, unstable mechanical drone",
+  "author": "",
+  "tags": ["dark", "mechanical", "drone"],
+
+  "sources": {
+    "osc1": {
+      "waveform": "sawtooth",
+      "frequency": 120.0,
+      "detune": 0.0,
+      "gain": 0.3
+    },
+    "osc2": {
+      "waveform": "triangle",
+      "frequency": 180.0,
+      "detune": -5.0,
+      "gain": 0.2
+    },
+    "osc3": {
+      "waveform": "sine",
+      "frequency": 240.0,
+      "detune": 8.0,
+      "gain": 0.25
+    },
+    "noise": {
+      "type": "pink",
+      "gain": 0.15,
+      "filterType": "bandpass",
+      "filterFrequency": 800.0
+    }
+  },
+
+  "filter": {
+    "type": "lowpass",
+    "frequency": 1200.0,
+    "Q": 8.0
+  },
+
+  "modulation": {
+    "lfo1": {
+      "waveform": "sine",
+      "rate": 0.1,
+      "depth": 30.0,
+      "target": "osc1.frequency"
+    },
+    "lfo2": {
+      "waveform": "triangle",
+      "rate": 0.05,
+      "depth": 500.0,
+      "target": "filter.frequency"
+    },
+    "lfo3": {
+      "waveform": "sine",
+      "rate": 0.02,
+      "depth": 0.8,
+      "target": "panner.pan"
+    },
+    "randomWalk1": {
+      "target": "filter.Q",
+      "min": 2.0,
+      "max": 20.0,
+      "stepSize": 1.0,
+      "interval": 100,
+      "smoothing": 0.1
+    },
+    "randomWalk2": {
+      "target": "filter.frequency",
+      "min": 400.0,
+      "max": 3000.0,
+      "stepSize": 150.0,
+      "interval": 200,
+      "smoothing": 0.2
+    },
+    "randomWalk3": {
+      "target": "masterGain",
+      "min": 0.5,
+      "max": 1.0,
+      "stepSize": 0.05,
+      "interval": 150,
+      "smoothing": 0.15
+    }
+  },
+
+  "effects": {
+    "delay": {
+      "time": 0.3,
+      "feedback": 0.4,
+      "mix": 0.3
+    },
+    "reverb": {
+      "enabled": true,
+      "mix": 0.2,
+      "decay": 2.5
+    }
+  },
+
+  "atmosphere": {
+    "tension": 0.3,
+    "instability": 0.4,
+    "complexity": 0.5
+  },
+
+  "master": {
+    "gain": 0.7,
+    "pan": 0.0
+  }
+}
+```
+
+---
+
+## 3. Field Reference
+
+### 3.1 Top Level
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `version` | string | ✅ | Preset format version |
+| `name` | string | ✅ | Human-readable preset name |
+| `seed` | integer | ✅ | PRNG seed for session variation |
+| `description` | string | ❌ | Optional description |
+| `author` | string | ❌ | Optional author |
+| `tags` | string[] | ❌ | Optional categorization tags |
+
+### 3.2 Sources
+
+Each oscillator:
+| Field | Type | Range | Default |
+|-------|------|-------|---------|
+| `waveform` | string | `sine`, `triangle`, `sawtooth`, `square` | `sawtooth` |
+| `frequency` | number | 20–2000 | 120 |
+| `detune` | number | -1200–1200 | 0 |
+| `gain` | number | 0.0–1.0 | 0.3 |
+
+Noise:
+| Field | Type | Range | Default |
+|-------|------|-------|---------|
+| `type` | string | `white`, `pink` | `pink` |
+| `gain` | number | 0.0–1.0 | 0.15 |
+| `filterType` | string | `lowpass`, `bandpass`, `highpass` | `bandpass` |
+| `filterFrequency` | number | 50–8000 | 800 |
+
+### 3.3 Filter
+
+| Field | Type | Range | Default |
+|-------|------|-------|---------|
+| `type` | string | `lowpass`, `highpass`, `bandpass`, `notch`, `peaking` | `lowpass` |
+| `frequency` | number | 20–12000 | 1200 |
+| `Q` | number | 0.1–40 | 8 |
+
+### 3.4 Modulation — LFOs
+
+| Field | Type | Range | Default |
+|-------|------|-------|---------|
+| `waveform` | string | `sine`, `triangle`, `sawtooth`, `square` | `sine` |
+| `rate` | number | 0.01–20 | 0.1 |
+| `depth` | number | target-specific | varies |
+| `target` | string | see target list | `osc1.frequency` |
+
+### 3.5 Modulation — Random Walks
+
+| Field | Type | Range | Default |
+|-------|------|-------|---------|
+| `target` | string | see target list | `filter.Q` |
+| `min` | number | target-specific | 2 |
+| `max` | number | target-specific | 20 |
+| `stepSize` | number | 0.01–5.0 | 1.0 |
+| `interval` | integer | 50–500 | 100 |
+| `smoothing` | number | 0.01–1.0 | 0.1 |
+
+### 3.6 Modulation Targets
+
+```
+osc1.frequency    osc2.frequency    osc3.frequency
+osc1.detune       osc2.detune       osc3.detune
+osc1.gain         osc2.gain         osc3.gain
+filter.frequency  filter.Q
+noise.gain        noise.filterFrequency
+delay.time        delay.feedback    delay.mix
+reverb.mix
+panner.pan        masterGain
+lfo1.rate         lfo2.rate         lfo3.rate
+```
+
+### 3.7 Effects
+
+Delay:
+| Field | Type | Range | Default |
+|-------|------|-------|---------|
+| `time` | number | 0.01–2.0 | 0.3 |
+| `feedback` | number | 0.0–0.95 | 0.4 |
+| `mix` | number | 0.0–1.0 | 0.3 |
+
+Reverb:
+| Field | Type | Range | Default |
+|-------|------|-------|---------|
+| `enabled` | boolean | true/false | true |
+| `mix` | number | 0.0–1.0 | 0.2 |
+| `decay` | number | 0.5–5.0 | 2.5 |
+
+---
+
+## 4. Built-In Presets (v1.0)
+
+### 4.1 Deep Drone
+
+```json
+{
+  "version": "1.0",
+  "name": "Deep Drone",
+  "seed": 101,
+  "description": "A deep, slow, atmospheric drone",
+  "sources": {
+    "osc1": { "waveform": "sawtooth", "frequency": 55, "detune": 0, "gain": 0.35 },
+    "osc2": { "waveform": "triangle", "frequency": 82, "detune": -3, "gain": 0.25 },
+    "osc3": { "waveform": "sine", "frequency": 110, "detune": 2, "gain": 0.2 },
+    "noise": { "type": "pink", "gain": 0.1, "filterType": "lowpass", "filterFrequency": 400 }
+  },
+  "filter": { "type": "lowpass", "frequency": 600, "Q": 5 },
+  "modulation": {
+    "lfo1": { "waveform": "sine", "rate": 0.03, "depth": 15, "target": "osc1.frequency" },
+    "lfo2": { "waveform": "triangle", "rate": 0.01, "depth": 200, "target": "filter.frequency" },
+    "lfo3": { "waveform": "sine", "rate": 0.008, "depth": 0.6, "target": "panner.pan" },
+    "randomWalk1": { "target": "filter.Q", "min": 3, "max": 12, "stepSize": 0.5, "interval": 300, "smoothing": 0.3 },
+    "randomWalk2": { "target": "filter.frequency", "min": 300, "max": 1200, "stepSize": 50, "interval": 500, "smoothing": 0.5 },
+    "randomWalk3": { "target": "delay.mix", "min": 0.1, "max": 0.5, "stepSize": 0.03, "interval": 400, "smoothing": 0.2 }
+  },
+  "effects": {
+    "delay": { "time": 0.8, "feedback": 0.5, "mix": 0.3 },
+    "reverb": { "enabled": true, "mix": 0.35, "decay": 3.5 }
+  },
+  "atmosphere": { "tension": 0.15, "instability": 0.25, "complexity": 0.4 },
+  "master": { "gain": 0.7, "pan": 0 }
+}
+```
+
+### 4.2 Tension Builder
+
+```json
+{
+  "version": "1.0",
+  "name": "Tension Builder",
+  "seed": 202,
+  "description": "Rising dissonance and instability",
+  "sources": {
+    "osc1": { "waveform": "sawtooth", "frequency": 110, "detune": 0, "gain": 0.3 },
+    "osc2": { "waveform": "square", "frequency": 165, "detune": -25, "gain": 0.25 },
+    "osc3": { "waveform": "sawtooth", "frequency": 220, "detune": 15, "gain": 0.2 },
+    "noise": { "type": "white", "gain": 0.2, "filterType": "bandpass", "filterFrequency": 1200 }
+  },
+  "filter": { "type": "lowpass", "frequency": 2000, "Q": 12 },
+  "modulation": {
+    "lfo1": { "waveform": "sawtooth", "rate": 0.5, "depth": 40, "target": "osc1.frequency" },
+    "lfo2": { "waveform": "sawtooth", "rate": 0.2, "depth": 800, "target": "filter.frequency" },
+    "lfo3": { "waveform": "triangle", "rate": 0.08, "depth": 0.9, "target": "panner.pan" },
+    "randomWalk1": { "target": "filter.Q", "min": 5, "max": 35, "stepSize": 2.5, "interval": 80, "smoothing": 0.08 },
+    "randomWalk2": { "target": "delay.feedback", "min": 0.2, "max": 0.8, "stepSize": 0.1, "interval": 100, "smoothing": 0.1 },
+    "randomWalk3": { "target": "masterGain", "min": 0.5, "max": 1.0, "stepSize": 0.08, "interval": 60, "smoothing": 0.05 }
+  },
+  "effects": {
+    "delay": { "time": 0.2, "feedback": 0.6, "mix": 0.4 },
+    "reverb": { "enabled": true, "mix": 0.15, "decay": 1.5 }
+  },
+  "atmosphere": { "tension": 0.7, "instability": 0.65, "complexity": 0.7 },
+  "master": { "gain": 0.75, "pan": 0 }
+}
+```
+
+### 4.3 Serene Void
+
+```json
+{
+  "version": "1.0",
+  "name": "Serene Void",
+  "seed": 303,
+  "description": "Quiet, spacious, minimal",
+  "sources": {
+    "osc1": { "waveform": "sine", "frequency": 65, "detune": 0, "gain": 0.2 },
+    "osc2": { "waveform": "sine", "frequency": 98, "detune": 2, "gain": 0.15 },
+    "osc3": { "waveform": "sine", "frequency": 130, "detune": -1, "gain": 0.1 },
+    "noise": { "type": "pink", "gain": 0.05, "filterType": "lowpass", "filterFrequency": 300 }
+  },
+  "filter": { "type": "lowpass", "frequency": 500, "Q": 2 },
+  "modulation": {
+    "lfo1": { "waveform": "sine", "rate": 0.01, "depth": 8, "target": "osc1.frequency" },
+    "lfo2": { "waveform": "sine", "rate": 0.005, "depth": 150, "target": "filter.frequency" },
+    "lfo3": { "waveform": "sine", "rate": 0.003, "depth": 0.4, "target": "panner.pan" },
+    "randomWalk1": { "target": "filter.Q", "min": 1, "max": 5, "stepSize": 0.2, "interval": 500, "smoothing": 0.5 },
+    "randomWalk2": { "target": "reverb.mix", "min": 0.2, "max": 0.5, "stepSize": 0.02, "interval": 800, "smoothing": 0.3 },
+    "randomWalk3": { "target": "masterGain", "min": 0.6, "max": 0.8, "stepSize": 0.02, "interval": 600, "smoothing": 0.4 }
+  },
+  "effects": {
+    "delay": { "time": 1.5, "feedback": 0.3, "mix": 0.2 },
+    "reverb": { "enabled": true, "mix": 0.5, "decay": 4.5 }
+  },
+  "atmosphere": { "tension": 0.1, "instability": 0.15, "complexity": 0.3 },
+  "master": { "gain": 0.6, "pan": 0 }
+}
+```
+
+---
+
+## 5. Serialization
+
+### Save to localStorage
+
+```js
+localStorage.setItem('echo-preset-' + preset.name, JSON.stringify(preset));
+```
+
+### Export to file
+
+```js
+function exportPreset(preset) {
+  const blob = new Blob([JSON.stringify(preset, null, 2)], {
+    type: 'application/json'
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `echo-preset-${preset.name.toLowerCase().replace(/\s+/g, '-')}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+```
+
+### Share via URL
+
+```js
+function encodePresetToHash(preset) {
+  const json = JSON.stringify(preset);
+  return '#preset=' + btoa(encodeURIComponent(json));
+}
+
+function decodePresetFromHash() {
+  const match = location.hash.match(/#preset=(.+)/);
+  if (!match) return null;
+  return JSON.parse(decodeURIComponent(atob(match[1])));
+}
+```
+
+---
+
+## 6. Validation
+
+When loading a preset (import or URL):
+
+1. Parse JSON (catch errors)
+2. Check `version` field exists
+3. Validate all required fields exist
+4. Clamp all numeric values to valid ranges
+5. Log warnings for missing optional fields (use defaults)
+6. Reject if `version` major version is incompatible
+
+---
+
+## 7. Versioning
+
+| Version | Changes |
+|---------|---------|
+| 1.0 | Initial format |
+
+Forward compatibility: unknown fields are ignored on load.
+Backward compatibility: missing optional fields use defaults.
+```
+
+---
+
+## Document 7: `IMPLEMENTATION-GUIDE.md`
+
+```markdown
+# ECHO ENGINE — Implementation Guide
+
+**Version:** 1.0  
+**Target:** First working version (Phase 1 + Phase 2)
+
+---
+
+## 1. Implementation Order
+
+Build in this order for fastest working result:
+
+```
+Step 1: Seeded RNG (rng.js)                   — 30 min
+Step 2: Audio Graph builder (audio-graph.js)   — 2 hrs
+Step 3: Modulation Engine (modulation.js)      — 2 hrs
+Step 4: Atmosphere Controller (atmosphere.js)  — 1 hr
+Step 5: Event Engine (events.js)               — 1 hr
+Step 6: EchoEngine orchestrator (echo-engine.js) — 1 hr
+Step 7: Preset Manager (preset-manager.js)     — 1 hr
+Step 8: Sound Lab HTML/CSS (index.html, lab.css) — 3 hrs
+Step 9: Sound Lab UI controller (app.js, ui.js) — 2 hrs
+Step 10: Visualizer (visualizer.js)            — 1 hr
+Step 11: Event Simulator (event-simulator.js)  — 30 min
+Step 12: Preset UI integration                 — 1 hr
+Step 13: PWA manifest + service worker          — 1 hr
+Step 14: Testing + debugging                    — 2 hrs
+                                           Total: ~18 hrs
+```
+
+---
+
+## 2. Core Implementation Details
+
+### 2.1 Seeded RNG (rng.js)
+
+```js
+export function createRNG(seed) {
+  let state = seed | 0;
+  return {
+    next() {
+      state = (state + 0x6D2B79F5) | 0;
+      let t = Math.imul(state ^ (state >>> 15), 1 | state);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    },
+    nextRange(min, max) {
+      return min + this.next() * (max - min);
+    },
+    nextInt(min, max) {
+      return Math.floor(this.nextRange(min, max + 1));
+    },
+    reset(newSeed) {
+      state = (newSeed !== undefined ? newSeed : seed) | 0;
+    }
+  };
+}
+```
+
+---
+
+### 2.2 Audio Graph Builder (audio-graph.js)
+
+```js
+export function buildAudioGraph(ctx) {
+  const nodes = {};
+
+  // === Oscillators ===
+  nodes.osc1 = ctx.createOscillator();
+  nodes.osc1.type = 'sawtooth';
+  nodes.osc1.frequency.value = 120;
+
+  nodes.osc2 = ctx.createOscillator();
+  nodes.osc2.type = 'triangle';
+  nodes.osc2.frequency.value = 180;
+
+  nodes.osc3 = ctx.createOscillator();
+  nodes.osc3.type = 'sine';
+  nodes.osc3.frequency.value = 240;
+
+  // === Oscillator Gains ===
+  nodes.osc1Gain = ctx.createGain();
+  nodes.osc1Gain.gain.value = 0.3;
+
+  nodes.osc2Gain = ctx.createGain();
+  nodes.osc2Gain.gain.value = 0.2;
+
+  nodes.osc3Gain = ctx.createGain();
+  nodes.osc3Gain.gain.value = 0.25;
+
+  // === Noise Source (generated buffer) ===
+  nodes.noise = ctx.createBufferSource();
+  nodes.noise.buffer = generateNoiseBuffer(ctx, 'pink', 4);
+  nodes.noise.loop = true;
+
+  nodes.noiseFilter = ctx.createBiquadFilter();
+  nodes.noiseFilter.type = 'bandpass';
+  nodes.noiseFilter.frequency.value = 800;
+
+  nodes.noiseGain = ctx.createGain();
+  nodes.noiseGain.gain.value = 0.15;
+
+  // === Main Filter ===
+  nodes.filter = ctx.createBiquadFilter();
+  nodes.filter.type = 'lowpass';
+  nodes.filter.frequency.value = 1200;
+  nodes.filter.Q.value = 8;
+
+  nodes.postGain = ctx.createGain();
+  nodes.postGain.gain.value = 1.0;
+
+  // === Delay ===
+  nodes.delay = ctx.createDelay(2.0);
+  nodes.delay.delayTime.value = 0.3;
+
+  nodes.delayFeedback = ctx.createGain();
+  nodes.delayFeedback.gain.value = 0.4;
+
+  nodes.delayMix = ctx.createGain();
+  nodes.delayMix.gain.value = 0.3;
+
+  // === Reverb ===
+  nodes.reverb = ctx.createConvolver();
+  nodes.reverb.buffer = generateReverbIR(ctx, 2.5, 2);
+
+  nodes.reverbMix = ctx.createGain();
+  nodes.reverbMix.gain.value = 0.2;
+
+  // === Stereo Panner ===
+  nodes.panner = ctx.createStereoPanner();
+  nodes.panner.pan.value = 0;
+
+  // === Master Gain ===
+  nodes.masterGain = ctx.createGain();
+  nodes.masterGain.gain.value = 0.7;
+
+  // === Analyser ===
+  nodes.analyser = ctx.createAnalyser();
+  nodes.analyser.fftSize = 2048;
+
+  // === LFOs ===
+  nodes.lfo1 = ctx.createOscillator();
+  nodes.lfo1.type = 'sine';
+  nodes.lfo1.frequency.value = 0.1;
+  nodes.lfo1Depth = ctx.createGain();
+  nodes.lfo1Depth.gain.value = 20;
+
+  nodes.lfo2 = ctx.createOscillator();
+  nodes.lfo2.type = 'triangle';
+  nodes.lfo2.frequency.value = 0.05;
+  nodes.lfo2Depth = ctx.createGain();
+  nodes.lfo2Depth.gain.value = 500;
+
+  nodes.lfo3 = ctx.createOscillator();
+  nodes.lfo3.type = 'sine';
+  nodes.lfo3.frequency.value = 0.02;
+  nodes.lfo3Depth = ctx.createGain();
+  nodes.lfo3Depth.gain.value = 0.8;
+
+  // === Connections ===
+  // Sources → mix
+  nodes.osc1.connect(nodes.osc1Gain);
+  nodes.osc2.connect(nodes.osc2Gain);
+  nodes.osc3.connect(nodes.osc3Gain);
+  nodes.noise.connect(nodes.noiseFilter);
+  nodes.noiseFilter.connect(nodes.noiseGain);
+
+  // Mix bus: connect all source gains to filter
+  nodes.osc1Gain.connect(nodes.filter);
+  nodes.osc2Gain.connect(nodes.filter);
+  nodes.osc3Gain.connect(nodes.filter);
+  nodes.noiseGain.connect(nodes.filter);
+
+  // Filter → post gain
+  nodes.filter.connect(nodes.postGain);
+
+  // Post gain → delay (wet) and direct (dry)
+  nodes.postGain.connect(nodes.delayMix); // wet
+  nodes.postGain.connect(nodes.panner);    // dry
+
+  // Delay feedback loop
+  nodes.postGain.connect(nodes.delay);
+  nodes.delay.connect(nodes.delayFeedback);
+  nodes.delayFeedback.connect(nodes.delay);
+  nodes.delay.connect(nodes.delayMix);
+
+  // Delay mix → reverb
+  nodes.delayMix.connect(nodes.reverbMix);
+
+  // Reverb (wet) and delay mix (dry-ish) → panner
+  nodes.reverbMix.connect(nodes.panner);
+
+  // Panner → master → analyser → destination
+  nodes.panner.connect(nodes.masterGain);
+  nodes.masterGain.connect(nodes.analyser);
+  nodes.analyser.connect(ctx.destination);
+
+  // LFO connections (initial routing)
+  nodes.lfo1.connect(nodes.lfo1Depth);
+  nodes.lfo2.connect(nodes.lfo2Depth);
+  nodes.lfo3.connect(nodes.lfo3Depth);
+
+  // Default LFO targets
+  nodes.lfo1Depth.connect(nodes.osc1.frequency);
+  nodes.lfo2Depth.connect(nodes.filter.frequency);
+  nodes.lfo3Depth.connect(nodes.panner.pan);
+
+  // Start oscillators and LFOs
+  nodes.osc1.start();
+  nodes.osc2.start();
+  nodes.osc3.start();
+  nodes.noise.start();
+  nodes.lfo1.start();
+  nodes.lfo2.start();
+  nodes.lfo3.start();
+
+  return nodes;
+}
+
+// === Noise Buffer Generator ===
+function generateNoiseBuffer(ctx, type, duration) {
+  const length = ctx.sampleRate * duration;
+  const buffer = ctx.createBuffer(1, length, ctx.sampleRate);
+  const data = buffer.getChannelData(0);
+
+  if (type === 'white') {
+    for (let i = 0; i < length; i++) {
+      data[i] = Math.random() * 2 - 1;
+    }
+  } else if (type === 'pink') {
+    // Paul Kellet's refined pink noise algorithm
+    let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
+    for (let i = 0; i < length; i++) {
+      const white = Math.random() * 2 - 1;
+      b0 = 0.99886 * b0 + white * 0.0555179;
+      b1 = 0.99332 * b1 + white * 0.0750759;
+      b2 = 0.96900 * b2 + white * 0.1538520;
+      b3 = 0.86650 * b3 + white * 0.3104856;
+      b4 = 0.55000 * b4 + white * 0.5329522;
+      b5 = -0.7616 * b5 - white * 0.0168980;
+      data[i] = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + white * 0.5362) * 0.11;
+      b6 = white * 0.115926;
+    }
+  }
+  return buffer;
+}
+
+// === Procedural Reverb IR Generator ===
+function generateReverbIR(ctx, decay, channels) {
+  const length = ctx.sampleRate * decay;
+  const buffer = ctx.createBuffer(channels, length, ctx.sampleRate);
+
+  for (let ch = 0; ch < channels; ch++) {
+    const data = buffer.getChannelData(ch);
+    for (let i = 0; i < length; i++) {
+      data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / length, decay);
+    }
+  }
+  return buffer;
+}
+```
+
+---
+
+### 2.3 Modulation Engine (modulation.js)
+
+```js
+export class ModulationEngine {
+  constructor(ctx, nodes, rng) {
+    this.ctx = ctx;
+    this.nodes = nodes;
+    this.rng = rng;
+    this.walks = [];
+    this.walkTimers = [];
+  }
+
+  // === LFO Configuration ===
+  configureLFO(lfoNum, { waveform, rate, depth, target }) {
+    const lfo = this.nodes[`lfo${lfoNum}`];
+    const lfoDepth = this.nodes[`lfo${lfoNum}Depth`];
+
+    lfo.type = waveform;
+    lfo.frequency.value = rate;
+    lfoDepth.gain.value = depth;
+
+    // Reconnect LFO to target
+    lfoDepth.disconnect();
+    const targetParam = this.resolveTarget(target);
+    if (targetParam) {
+      lfoDepth.connect(targetParam);
+    }
+  }
+
+  // === Random Walk Configuration ===
+  configureWalk(walkNum, { target, min, max, stepSize, interval, smoothing }) {
+    const walk = {
+      target,
+      targetParam: this.resolveTarget(target),
+      min, max, stepSize,
+      smoothing,
+      current: min + (max - min) * 0.5
+    };
+
+    this.walks[walkNum] = walk;
+
+    // Clear existing timer
+    if (this.walkTimers[walkNum]) {
+      clearInterval(this.walkTimers[walkNum]);
+    }
+
+    // Start walk timer
+    this.walkTimers[walkNum] = setInterval(() => {
+      this.updateWalk(walk);
+    }, interval);
+  }
+
+  updateWalk(walk) {
+    if (!walk.targetParam) return;
+
+    const step = (this.rng.next() * 2 - 1) * walk.stepSize;
+    walk.current = Math.max(walk.min, Math.min(walk.max, walk.current + step));
+    walk.targetParam.setTargetAtTime(walk.current, this.ctx.currentTime, walk.smoothing);
+  }
+
+  // === Resolve parameter path to AudioParam ===
+  resolveTarget(path) {
+    const map = {
+      'osc1.frequency': this.nodes.osc1.frequency,
+      'osc2.frequency': this.nodes.osc2.frequency,
+      'osc3.frequency': this.nodes.osc3.frequency,
+      'osc1.detune': this.nodes.osc1.detune,
+      'osc2.detune': this.nodes.osc2.detune,
+      'osc3.detune': this.nodes.osc3.detune,
+      'osc1.gain': this.nodes.osc1Gain.gain,
+      'osc2.gain': this.nodes.osc2Gain.gain,
+      'osc3.gain': this.nodes.osc3Gain.gain,
+      'filter.frequency': this.nodes.filter.frequency,
+      'filter.Q': this.nodes.filter.Q,
+      'noise.gain': this.nodes.noiseGain.gain,
+      'delay.time': this.nodes.delay.delayTime,
+      'delay.feedback': this.nodes.delayFeedback.gain,
+      'delay.mix': this.nodes.delayMix.gain,
+      'reverb.mix': this.nodes.reverbMix.gain,
+      'panner.pan': this.nodes.panner.pan,
+      'masterGain': this.nodes.masterGain.gain,
+    };
+    return map[path] || null;
+  }
+
+  // === Set LFO rate dynamically ===
+  setLFORate(lfoNum, rate) {
+    const lfo = this.nodes[`lfo${lfoNum}`];
+    lfo.frequency.setTargetAtTime(rate, this.ctx.currentTime, 0.1);
+  }
+
+  // === Cleanup ===
+  destroy() {
+    this.walkTimers.forEach(t => clearInterval(t));
+    this.walkTimers = [];
+  }
+}
+```
+
+---
+
+### 2.4 Atmosphere Controller (atmosphere.js)
+
+```js
+export class AtmosphereController {
+  constructor(ctx, nodes, modulation) {
+    this.ctx = ctx;
+    this.nodes = nodes;
+    this.modulation = modulation;
+    this.current = { tension: 0, instability: 0, complexity: 0 };
+    this.rampTime = 0.5; // seconds for smooth transitions
+  }
+
+  setAtmosphere(tension, instability, complexity) {
+    this.current = {
+      tension: this.clamp(tension, 0, 1),
+      instability: this.clamp(instability, 0, 1),
+      complexity: this.clamp(complexity, 0, 1)
+    };
+    this.apply();
+  }
+
+  apply() {
+    const { tension, instability, complexity } = this.current;
+    const t = this.ctx.currentTime;
+    const r = this.rampTime;
+
+    // === Tension mapping ===
+    this.rampParam(this.nodes.osc1.detune, tension * 50, t, r);
+    this.rampParam(this.nodes.osc2.detune, -tension * 30, t, r);
+    this.rampParam(this.nodes.filter.Q, 8 + tension * 15, t, r);
+    this.rampParam(this.nodes.noiseGain.gain, 0.05 + tension * 0.25, t, r);
+    this.rampParam(this.nodes.delayFeedback.gain, 0.3 + tension * 0.4, t, r);
+
+    // === Instability mapping ===
+    // Adjust random walk step sizes
+    if (this.modulation.walks[0]) {
+      this.modulation.walks[0].stepSize = 0.5 + instability * 2.5;
+    }
+    if (this.modulation.walks[1]) {
+      this.modulation.walks[1].stepSize = 0.5 + instability * 2.5;
+    }
+
+    // === Complexity mapping ===
+    this.rampParam(this.nodes.osc1Gain.gain, 0.1 + complexity * 0.3, t, r);
+    this.rampParam(this.nodes.osc2Gain.gain, 0.05 + complexity * 0.3, t, r);
+    this.rampParam(this.nodes.osc3Gain.gain, 0.0 + complexity * 0.3, t, r);
+    this.rampParam(this.nodes.delayMix.gain, 0.1 + complexity * 0.4, t, r);
+    this.rampParam(this.nodes.reverbMix.gain, 0.1 + complexity * 0.3, t, r);
+  }
+
+  rampParam(param, value, time, rampTime) {
+    param.linearRampToValueAtTime(value, time + rampTime);
+  }
+
+  clamp(v, min, max) {
+    return Math.max(min, Math.min(max, v));
+  }
+}
+```
+
+---
+
+### 2.5 Event Engine (events.js)
+
+```js
+export class EventEngine {
+  constructor(ctx, nodes) {
+    this.ctx = ctx;
+    this.nodes = nodes;
+    this.definitions = this.buildDefinitions();
+  }
+
+  buildDefinitions() {
+    return {
+      portal: {
+        duration: 2.0,
+        automations: [
+          { param: 'filter.frequency', from: 400, to: 4000, time: 0.5 },
+          { param: 'filter.frequency', from: 4000, to: 400, time: 1.5, after: 0.5 },
+          { param: 'filter.Q', from: 8, to: 25, time: 0.3 },
+          { param: 'filter.Q', from: 25, to: 8, time: 1.7, after: 0.3 },
+          { param: 'delay.feedback', from: 0.4, to: 0.8, time: 0.3 },
+          { param: 'delay.feedback', from: 0.8, to: 0.4, time: 1.7, after: 0.3 },
+        ]
+      },
+      collision: {
+        duration: 0.5,
+        automations: [
+          { param: 'noise.gain', from: 0.15, to: 0.6, time: 0.05 },
+          { param: 'noise.gain', from: 0.6, to: 0.15, time: 0.45, after: 0.05 },
+          { param: 'filter.Q', from: 8, to: 40, time: 0.05 },
+          { param: 'filter.Q', from: 40, to: 8, time: 0.45, after: 0.05 },
+          { param: 'masterGain', from: 0.7, to: 0.4, time: 0.02 },
+          { param: 'masterGain', from: 0.4, to: 0.7, time: 0.48, after: 0.02 },
+        ]
+      },
+      gameOver: {
+        duration: 4.0,
+        automations: [
+          { param: 'filter.frequency', from: 1200, to: 100, time: 3.5 },
+          { param: 'filter.Q', from: 8, to: 2, time: 3.5 },
+          { param: 'reverb.mix', from: 0.2, to: 0.8, time: 2.0 },
+          { param: 'delay.feedback', from: 0.4, to: 0.85, time: 2.5 },
+          { param: 'noise.gain', from: 0.15, to: 0.05, time: 3.0 },
+        ]
+      },
+      danger: {
+        duration: 1.5,
+        automations: [
+          { param: 'osc1.detune', from: 0, to: 35, time: 0.5 },
+          { param: 'osc1.detune', from: 35, to: 0, time: 1.0, after: 0.5 },
+          { param: 'osc2.detune', from: -5, to: -25, time: 0.5 },
+          { param: 'osc2.detune', from: -25, to: -5, time: 1.0, after: 0.5 },
+          { param: 'noise.gain', from: 0.15, to: 0.35, time: 0.3 },
+          { param: 'noise.gain', from: 0.35, to: 0.15, time: 1.2, after: 0.3 },
+        ]
+      },
+      nearMiss: {
+        duration: 0.8,
+        automations: [
+          { param: 'filter.Q', from: 8, to: 20, time: 0.1 },
+          { param: 'filter.Q', from: 20, to: 8, time: 0.7, after: 0.1 },
+          { param: 'noise.gain', from: 0.15, to: 0.3, time: 0.05 },
+          { param: 'noise.gain', from: 0.3, to: 0.15, time: 0.75, after: 0.05 },
+        ]
+      },
+      pass: {
+        duration: 1.5,
+        automations: [
+          { param: 'filter.frequency', from: 1200, to: 800, time: 1.0 },
+          { param: 'filter.frequency', from: 800, to: 1200, time: 0.5, after: 1.0 },
+          { param: 'delay.mix', from: 0.3, to: 0.15, time: 1.0 },
+          { param: 'delay.mix', from: 0.15, to: 0.3, time: 0.5, after: 1.0 },
+        ]
+      },
+    };
+  }
+
+  trigger(eventName, options = {}) {
+    const def = this.definitions[eventName];
+    if (!def) return;
+
+    const intensity = options.intensity || 1.0;
+    const t = this.ctx.currentTime;
+
+    def.automations.forEach(aut => {
+      const param = this.resolveParam(aut.param);
+      if (!param) return;
+
+      const startTime = t + (aut.after || 0);
+      const scaledFrom = aut.from;
+      const scaledTo = aut.from + (aut.to - aut.from) * intensity;
+
+      param.setValueAtTime(scaledFrom, startTime);
+      param.linearRampToValueAtTime(scaledTo, startTime + aut.time);
+    });
+  }
+
+  resolveParam(path) {
+    const map = {
+      'filter.frequency': this.nodes.filter.frequency,
+      'filter.Q': this.nodes.filter.Q,
+      'noise.gain': this.nodes.noiseGain.gain,
+      'masterGain': this.nodes.masterGain.gain,
+      'delay.feedback': this.nodes.delayFeedback.gain,
+      'delay.mix': this.nodes.delayMix.gain,
+      'reverb.mix': this.nodes.reverbMix.gain,
+      'osc1.detune': this.nodes.osc1.detune,
+      'osc2.detune': this.nodes.osc2.detune,
+    };
+    return map[path] || null;
+  }
+}
+```
+
+---
+
+### 2.6 EchoEngine Main Class (echo-engine.js)
+
+```js
+import { createRNG } from './core/rng.js';
+import { buildAudioGraph } from './core/audio-graph.js';
+import { ModulationEngine } from './core/modulation.js';
+import { AtmosphereController } from './core/atmosphere.js';
+import { EventEngine } from './core/events.js';
+
+export class EchoEngine {
+  constructor(config = {}) {
+    this.config = {
+      seed: config.seed || Date.now(),
+      volume: config.volume ?? 0.7,
+      analyser: config.analyser ?? true,
+    };
+
+    this.state = 'idle';
+    this.ctx = null;
+    this.nodes = null;
+    this.rng = null;
+    this.modulation = null;
+    this.atmosphere = null;
+    this.events = null;
+    this.gameStates = {};
+    this.callbacks = {};
+  }
+
+  async start() {
+    if (this.state === 'playing') return;
+    if (this.state === 'destroyed') throw new Error('Engine destroyed');
+
+    this.state = 'starting';
+
+    // Create AudioContext (must be called from user gesture)
+    if (!this.ctx) {
+      this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    await this.ctx.resume();
+
+    if (!this.nodes) {
+      // Initialize RNG
+      this.rng = createRNG(this.config.seed);
+
+      // Build audio graph
+      this.nodes = buildAudioGraph(this.ctx);
+
+      // Initialize modulation
+      this.modulation = new ModulationEngine(this.ctx, this.nodes, this.rng);
+      this.modulation.configureLFO(1, { waveform: 'sine', rate: 0.1, depth: 20, target: 'osc1.frequency' });
+      this.modulation.configureLFO(2, { waveform: 'triangle', rate: 0.05, depth: 500, target: 'filter.frequency' });
+      this.modulation.configureLFO(3, { waveform: 'sine', rate: 0.02, depth: 0.8, target: 'panner.pan' });
+
+      this.modulation.configureWalk(0, { target: 'filter.Q', min: 2, max: 20, stepSize: 1, interval: 100, smoothing: 0.1 });
+      this.modulation.configureWalk(1, { target: 'filter.frequency', min: 400, max: 3000, stepSize: 150, interval: 200, smoothing: 0.2 });
+      this.modulation.configureWalk(2, { target: 'masterGain', min: 0.5, max: 1, stepSize: 0.05, interval: 150, smoothing: 0.15 });
+
+      // Initialize atmosphere
+      this.atmosphere = new AtmosphereController(this.ctx, this.nodes, this.modulation);
+      this.atmosphere.setAtmosphere(0.3, 0.4, 0.5);
+
+      // Initialize events
+      this.events = new EventEngine(this.ctx, this.nodes);
+
+      // Set master volume
+      this.nodes.masterGain.gain.value = this.config.volume;
+    }
+
+    this.state = 'playing';
+    this.emit('started');
+  }
+
+  stop() {
+    if (this.ctx && this.state === 'playing') {
+      this.ctx.suspend();
+      this.state = 'suspended';
+      this.emit('stopped');
+    }
+  }
+
+  destroy() {
+    if (this.modulation) this.modulation.destroy();
+    if (this.ctx) {
+      this.ctx.close();
+      this.ctx = null;
+    }
+    this.nodes = null;
+    this.state = 'destroyed';
+  }
+
+  // === Atmosphere ===
+  setAtmosphere(tension, instability, complexity) {
+    if (this.atmosphere) this.atmosphere.setAtmosphere(tension, instability, complexity);
+  }
+
+  setTension(v) {
+    this.setAtmosphere(v, this.atmosphere?.current.instability ?? 0.4, this.atmosphere?.current.complexity ?? 0.5);
+  }
+
+  setInstability(v) {
+    this.setAtmosphere(this.atmosphere?.current.tension ?? 0.3, v, this.atmosphere?.current.complexity ?? 0.5);
+  }
+
+  setComplexity(v) {
+    this.setAtmosphere(this.atmosphere?.current.tension ?? 0.3, this.atmosphere?.current.instability ?? 0.4, v);
+  }
+
+  getAtmosphere() {
+    return this.atmosphere ? { ...this.atmosphere.current } : null;
+  }
+
+  // === Game State ===
+  setState(key, value) {
+    this.gameStates[key] = value;
+    // Map game states to atmosphere
+    if (key === 'tension') this.setTension(value);
+    if (key === 'progress') this.setComplexity(0.3 + value * 0.7);
+    if (key === 'proximity') this.setTension(0.1 + value * 0.9);
+    if (key === 'danger') {
+      this.setTension(0.2 + value * 0.8);
+      this.setInstability(0.2 + value * 0.6);
+    }
+  }
+
+  getState(key) {
+    return this.gameStates[key] ?? 0;
+  }
+
+  // === Events ===
+  triggerEvent(name, options) {
+    if (this.events) this.events.trigger(name, options);
+    this.emit('eventTriggered', { name, options });
+  }
+
+  // === Direct Parameters ===
+  setParam(path, value) {
+    if (this.modulation) {
+      const param = this.modulation.resolveTarget(path);
+      if (param) {
+        param.setTargetAtTime(value, this.ctx.currentTime, 0.05);
+      }
+    }
+  }
+
+  getParam(path) {
+    if (this.modulation) {
+      const param = this.modulation.resolveTarget(path);
+      return param ? param.value : null;
+    }
+    return null;
+  }
+
+  setParamType(path, type) {
+    if (!this.nodes) return;
+    const map = {
+      'osc1.waveform': () => this.nodes.osc1.type = type,
+      'osc2.waveform': () => this.nodes.osc2.type = type,
+      'osc3.waveform': () => this.nodes.osc3.type = type,
+      'filter.type': () => this.nodes.filter.type = type,
+      'noise.type': () => {
+        this.nodes.noise.buffer = generateNoiseBuffer(this.ctx, type, 4);
+      },
+      'lfo1.waveform': () => this.nodes.lfo1.type = type,
+      'lfo2.waveform': () => this.nodes.lfo2.type = type,
+      'lfo3.waveform': () => this.nodes.lfo3.type = type,
+    };
+    if (map[path]) map[path]();
+  }
+
+  // === Volume ===
+  setVolume(v) {
+    this.config.volume = Math.max(0, Math.min(1, v));
+    if (this.nodes) {
+      this.nodes.masterGain.gain.setTargetAtTime(this.config.volume, this.ctx.currentTime, 0.05);
+    }
+  }
+
+  getVolume() {
+    return this.config.volume;
+  }
+
+  // === Seed ===
+  getSeed() {
+    return this.config.seed;
+  }
+
+  setSeed(seed) {
+    this.config.seed = seed;
+    if (this.rng) this.rng.reset(seed);
+    this.emit('seedChanged', { seed });
+  }
+
+  reseed(seed) {
+    const s = seed || Date.now();
+    this.setSeed(s);
+  }
+
+  // === Presets ===
+  savePreset(name) {
+    return {
+      version: '1.0',
+      name: name || 'Untitled',
+      seed: this.config.seed,
+      // ... capture all parameters from nodes and modulation
+      // (see PRESET-SPEC.md for full format)
+    };
+  }
+
+  loadPreset(preset) {
+    if (!this.nodes) return;
+    // Apply all preset parameters
+    // ... (implement per PRESET-SPEC.md)
+    this.emit('presetLoaded', { name: preset.name });
+  }
+
+  // === Utility ===
+  getAnalyser() {
+    return this.nodes?.analyser || null;
+  }
+
+  getAudioContext() {
+    return this.ctx;
+  }
+
+  isRunning() {
+    return this.state === 'playing';
+  }
+
+  onEvent(callback) {
+    this.callbacks.event = callback;
+  }
+
+  emit(event, data) {
+    if (this.callbacks.event) {
+      this.callbacks.event(event, data || {});
+    }
+  }
+}
+```
+
+---
+
+## 3. Sound Lab Application (lab/)
+
+### 3.1 index.html Structure
+
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#ff8c00">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>Echo Engine Sound Lab</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="stylesheet" href="css/lab.css">
+</head>
+<body>
+  <!-- Audio unlock overlay -->
+  <div id="unlock-overlay" class="overlay">
+    <div class="unlock-content">
+      <div class="unlock-icon">🔊</div>
+      <p>Tap to enable audio</p>
+    </div>
+  </div>
+
+  <!-- App -->
+  <div id="app" class="app">
+    <!-- Top bar -->
+    <header class="top-bar">
+      <h1>☠ ECHO LAB</h1>
+      <div class="seed-display">
+        <span class="seed-icon">🎲</span>
+        <span class="seed-label">Seed:</span>
+        <span id="seed-value">42</span>
+      </div>
+    </header>
+
+    <!-- Visualizer -->
+    <div class="visualizer-area">
+      <canvas id="visualizer"></canvas>
+      <button id="viz-toggle" class="viz-toggle">📊</button>
+    </div>
+
+    <!-- Status bar -->
+    <div class="status-bar">
+      <div class="status-left">
+        <span id="status-indicator" class="status-dot"></span>
+        <span id="status-text">STOPPED</span>
+      </div>
+      <div class="status-right">
+        <span id="volume-display">Vol: 70%</span>
+      </div>
+    </div>
+
+    <!-- Tab content area (scrollable) -->
+    <main class="content-area" id="content-area">
+      <!-- Content changes per tab -->
+    </main>
+
+    <!-- Action buttons -->
+    <div class="action-bar">
+      <button id="btn-play" class="btn btn-play">▶ Play</button>
+      <button id="btn-stop" class="btn btn-stop">⏹ Stop</button>
+      <button id="btn-new" class="btn">🎲 New</button>
+    </div>
+
+    <!-- Bottom navigation -->
+    <nav class="bottom-nav">
+      <button class="nav-btn active" data-tab="gen">
+        <span class="nav-icon">⚙</span>
+        <span class="nav-label">GEN</span>
+      </button>
+      <button class="nav-btn" data-tab="mod">
+        <span class="nav-icon">🎛</span>
+        <span class="nav-label">MOD</span>
+      </button>
+      <button class="nav-btn" data-tab="src">
+        <span class="nav-icon">🔊</span>
+        <span class="nav-label">SRC</span>
+      </button>
+      <button class="nav-btn" data-tab="evt">
+        <span class="nav-icon">🎮</span>
+        <span class="nav-label">EVT</span>
+      </button>
+      <button class="nav-btn" data-tab="prst">
+        <span class="nav-icon">💾</span>
+        <span class="nav-label">PRST</span>
+      </button>
+    </nav>
+  </div>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
+```
+
+### 3.2 Key CSS Patterns (lab.css)
+
+```css
+/* === Reset & Base === */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+:root {
+  --bg: #0a0a0f;
+  --surface: #141419;
+  --surface-elevated: #1c1c24;
+  --text: #e0e0e6;
+  --text-secondary: #808090;
+  --accent: #ff8c00;
+  --accent-light: #ffaa33;
+  --danger: #ff3344;
+  --track: #2a2a35;
+  --border: #222230;
+  --waveform: #00ff88;
+
+  --top-bar-h: 56px;
+  --status-bar-h: 40px;
+  --action-bar-h: 48px;
+  --nav-h: 56px;
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: manipulation;
+}
+
+/* === App Layout === */
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
+  padding-bottom: var(--safe-bottom);
+}
+
+/* === Touch Slider === */
+.param-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  padding: 8px 16px;
+  gap: 8px;
+}
+
+.param-label {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.param-value {
+  font-size: 13px;
+  font-family: monospace;
+  color: var(--accent);
+  min-width: 60px;
+  text-align: right;
+}
+
+.param-slider {
+  flex-basis: 100%;
+  -webkit-appearance: none;
+  appearance: none;
+  height: 44px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.param-slider::-webkit-slider-runnable-track {
+  height: 8px;
+  border-radius: 4px;
+  background: var(--track);
+}
+
+.param-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--accent);
+  margin-top: -6px;
+  border: 2px solid var(--bg);
+}
+
+.param-slider::-moz-range-track {
+  height: 8px;
+  border-radius: 4px;
+  background: var(--track);
+}
+
+.param-slider::-moz-range-thumb {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--bg);
+}
+
+/* === Segmented Control === */
+.segmented {
+  display: flex;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.segmented button {
+  flex: 1;
+  padding: 10px 12px;
+  background: var(--surface);
+  border: none;
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.segmented button.active {
+  background: var(--accent);
+  color: var(--bg);
+  font-weight: 600;
+}
+
+/* === Action Buttons === */
+.action-bar {
+  display: flex;
+  gap: 8px;
+  padding: 8px 16px;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+}
+
+.btn {
+  flex: 1;
+  height: 48px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-elevated);
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.btn:active {
+  background: var(--accent);
+  color: var(--bg);
+}
+
+.btn-play { border-color: var(--accent); color: var(--accent); }
+.btn-stop { border-color: var(--danger); color: var(--danger); }
+
+/* === Bottom Nav === */
+.bottom-nav {
+  display: flex;
+  height: var(--nav-h);
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+}
+
+.nav-btn {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  gap: 2px;
+  padding: 4px 0;
+}
+
+.nav-btn.active {
+  color: var(--accent);
+}
+
+.nav-btn.active::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  width: 40%;
+  height: 2px;
+  background: var(--accent);
+  border-radius: 1px;
+}
+
+.nav-icon { font-size: 20px; }
+.nav-label { font-size: 10px; font-weight: 500; }
+
+/* === Visualizer === */
+.visualizer-area {
+  position: relative;
+  height: 25vh;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.visualizer-area canvas {
+  width: 100%;
+  height: 100%;
+}
+
+.viz-toggle {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--surface-elevated);
+  border: 1px solid var(--border);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 16px;
+}
+
+/* === Event Buttons Grid === */
+.event-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  padding: 16px;
+}
+
+.event-btn {
+  height: 56px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-elevated);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: all 0.15s;
+}
+
+.event-btn:active {
+  background: var(--accent);
+  color: var(--bg);
+  transform: scale(0.97);
+}
+
+/* === Preset List === */
+.preset-list {
+  padding: 8px 16px;
+}
+
+.preset-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: var(--surface-elevated);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 8px;
+}
+
+.preset-item .preset-name {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.preset-item .preset-load-btn {
+  padding: 8px 16px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* === Overlay === */
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.unlock-icon { font-size: 48px; margin-bottom: 16px; }
+.unlock-content { text-align: center; font-size: 18px; }
+```
+
+---
+
+## 4. PWA Service Worker (sw.js)
+
+```js
+const CACHE_NAME = 'echo-lab-v1';
+const ASSETS = [
+  '/',
+  '/lab/index.html',
+  '/lab/css/lab.css',
+  '/lab/js/app.js',
+  '/lab/js/ui.js',
+  '/lab/js/visualizer.js',
+  '/src/echo-engine.js',
+  '/src/core/rng.js',
+  '/src/core/audio-graph.js',
+  '/src/core/modulation.js',
+  '/src/core/atmosphere.js',
+  '/src/core/events.js',
+  '/src/presets/preset-manager.js',
+];
+
+self.addEventListener('install', (e) => {
+  e.waitUntil(
+    caches.open(CACHE_NAME).then(cache => cache.addAll(ASSETS))
+  );
+});
+
+self.addEventListener('fetch', (e) => {
+  e.respondWith(
+    caches.match(e.request).then(res => res || fetch(e.request))
+  );
+});
+```
+
+---
+
+## 5. Testing Checklist
+
+### Audio Engine
+- [ ] AudioContext creates and resumes on user gesture
+- [ ] All 3 oscillators produce sound at configured frequencies
+- [ ] Noise generator produces white and pink noise
+- [ ] Main filter responds to frequency and Q changes
+- [ ] All 3 LFOs modulate their targets at configured rates
+- [ ] All 3 random walks update and modulate their targets
+- [ ] Delay effect produces audible echo with feedback
+- [ ] Reverb effect produces audible room ambience
+- [ ] Stereo panning works (left/right shift)
+- [ ] Master volume controls output level
+- [ ] Atmosphere macros affect multiple parameters simultaneously
+- [ ] Each event produces a distinct audible response
+- [ ] Game state changes modulate the soundscape
+
+### Session Variation
+- [ ] Different seeds produce different initial parameter values
+- [ ] Same seed produces identical (or near-identical) output
+- [ ] Extended playback (10 min) shows no obvious repetition
+
+### Sound Lab
+- [ ] Audio unlock overlay appears and dismisses correctly
+- [ ] Play/Stop buttons work correctly
+- [ ] All tabs render correct controls
+- [ ] Sliders update engine parameters in real-time
+- [ ] Segmented controls change oscillator waveforms
+- [ ] Visualizer shows waveform and spectrum
+- [ ] Event buttons trigger audible responses
+- [ ] Atmosphere sliders work
+- [ ] Preset save stores to localStorage
+- [ ] Preset load restores all parameters
+- [ ] Preset export downloads JSON file
+- [ ] Preset import loads from file
+
+### Mobile
+- [ ] App fits on phone screen without page scrolling
+- [ ] Touch targets are ≥ 44×44px
+- [ ] Audio starts after tap (iOS Safari)
+- [ ] Audio resumes after tab switch
+- [ ] Performance is smooth (< 5% CPU)
+- [ ] Works in portrait orientation
+
+### Desktop
+- [ ] Responsive layout on large screens
+- [ ] Keyboard navigation works
+- [ ] Hover states visible
+
+---
+
+## 6. Browser Compatibility Notes
+
+| Feature | Fallback |
+|---------|----------|
+| `AudioContext` | Use `webkitAudioContext` prefix |
+| `StereoPannerNode` | Not available on very old Safari — use two GainNodes |
+| `ConvolverNode` | Fully supported |
+| `createBufferSource` with pink noise | Fully supported |
+| CSS `env()` for safe area | Graceful degradation (0px) |
+| CSS `height: 100dvh` | Fallback to `100vh` |
+
+---
+
+## 7. Performance Budget
+
+| Metric | Target | Measurement |
+|--------|--------|-------------|
+| Engine JS size | < 30 KB gzipped | Bundle analyzer |
+| Lab JS size | < 20 KB gzipped | Bundle analyzer |
+| Total CSS | < 15 KB gzipped | Bundle analyzer |
+| Audio graph nodes | < 30 nodes | DevTools |
+| JS timers | 3 (walk intervals) | Manual |
+| Audio startup | < 200ms after gesture | Performance API |
+| CPU usage (steady state) | < 5% on mid-range mobile | DevTools profiler |
+| Memory | < 20 MB | DevTools memory |
+```
+
+---
+
+These seven documents give you a complete blueprint for building **Echo Engine v1.0** — from the core audio library through the mobile-first Sound Lab application. The architecture keeps everything modular and dependency-free while the implementation guide includes the key code patterns (audio graph construction, noise/reverb generation, modulation routing, event automation) so you can start building immediately.
+
+The key design decisions baked in:
+- **Zero external dependencies** — pure Web Audio API
+- **Mobile-first** — touch sliders, bottom nav, safe area insets, audio unlock, PWA
+- **Audio-thread scheduling** — all time-based changes use Web Audio ramps (survive frame drops)
+- **Seeded variation** — Mulberry32 PRNG for reproducible sessions
+- **Parametric presets** — JSON format with URL sharing

@@ -1,0 +1,6 @@
+{
+  "name": "Echo Engine Sound Lab",
+  "description": "Standalone procedural Web Audio synthesizer and Sound Laboratory for Shadowflap.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
