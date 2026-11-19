@@ -23,13 +23,16 @@ const WAVEFORM_OPTIONS: { value: OscillatorWaveform; label: string }[] = [
 ];
 
 const LFO_TARGETS: { value: ModulationTarget; label: string }[] = [
+  { value: 'osc1.detune', label: 'Osc 1 Detune' },
+  { value: 'osc2.detune', label: 'Osc 2 Detune' },
+  { value: 'filter.frequency', label: 'Filter Cutoff' },
+  { value: 'filter.Q', label: 'Filter Q' },
+  { value: 'fm.depth', label: 'FM Depth' },
+  { value: 'panner.pan', label: 'Stereo Pan' },
+  { value: 'delay.time', label: 'Delay Time' },
   { value: 'osc1.frequency', label: 'Osc 1 Frequency' },
   { value: 'osc2.frequency', label: 'Osc 2 Frequency' },
   { value: 'osc3.frequency', label: 'Osc 3 Frequency' },
-  { value: 'filter.frequency', label: 'Filter Cutoff' },
-  { value: 'filter.Q', label: 'Filter Q' },
-  { value: 'panner.pan', label: 'Stereo Pan' },
-  { value: 'delay.time', label: 'Delay Time' },
   { value: 'masterGain', label: 'Master Gain' },
   { value: 'lfo1.rate', label: 'LFO 1 Rate' },
   { value: 'lfo2.rate', label: 'LFO 2 Rate' },
@@ -38,16 +41,22 @@ const LFO_TARGETS: { value: ModulationTarget; label: string }[] = [
 const WALK_TARGETS: { value: ModulationTarget; label: string }[] = [
   { value: 'filter.Q', label: 'Filter Q' },
   { value: 'filter.frequency', label: 'Filter Cutoff' },
-  { value: 'masterGain', label: 'Master Gain' },
+  { value: 'fm.depth', label: 'FM Depth' },
+  { value: 'noise.filterFrequency', label: 'Noise Filter' },
   { value: 'delay.feedback', label: 'Delay Feedback' },
   { value: 'delay.mix', label: 'Delay Mix' },
   { value: 'reverb.mix', label: 'Reverb Mix' },
   { value: 'panner.pan', label: 'Stereo Pan' },
   { value: 'osc1.detune', label: 'Osc 1 Detune' },
+  { value: 'osc2.detune', label: 'Osc 2 Detune' },
+  { value: 'osc3.detune', label: 'Osc 3 Detune' },
+  { value: 'masterGain', label: 'Master Gain' },
 ];
 
 function getDepthMeta(target: ModulationTarget): { max: number; step: number; unit: string } {
   if (target === 'filter.frequency') return { max: 4000, step: 10, unit: 'Hz' };
+  if (target === 'fm.depth') return { max: 180, step: 1, unit: 'Hz' };
+  if (target.endsWith('.detune')) return { max: 120, step: 1, unit: 'ct' };
   if (target.endsWith('.frequency')) return { max: 200, step: 1, unit: 'Hz' };
   if (target === 'filter.Q') return { max: 20, step: 0.2, unit: '' };
   if (target === 'panner.pan') return { max: 1.0, step: 0.01, unit: '' };
@@ -56,11 +65,18 @@ function getDepthMeta(target: ModulationTarget): { max: number; step: number; un
   return { max: 0.5, step: 0.01, unit: '' };
 }
 
-function getWalkRangeBounds(target: ModulationTarget): { min: number; max: number; step: number; unit: string } {
+function getWalkRangeBounds(target: ModulationTarget): {
+  min: number;
+  max: number;
+  step: number;
+  unit: string;
+} {
   if (target === 'filter.frequency') return { min: 40, max: 8000, step: 10, unit: 'Hz' };
-  if (target === 'filter.Q') return { min: 0.5, max: 40, step: 0.5, unit: '' };
+  if (target === 'noise.filterFrequency') return { min: 100, max: 6000, step: 10, unit: 'Hz' };
+  if (target === 'fm.depth') return { min: 0, max: 220, step: 2, unit: 'Hz' };
+  if (target === 'filter.Q') return { min: 0.5, max: 32, step: 0.5, unit: '' };
   if (target === 'panner.pan') return { min: -1, max: 1, step: 0.05, unit: '' };
-  if (target === 'osc1.detune') return { min: -100, max: 100, step: 1, unit: 'ct' };
+  if (target.endsWith('.detune')) return { min: -100, max: 100, step: 1, unit: 'ct' };
   return { min: 0, max: 1, step: 0.02, unit: '' };
 }
 
@@ -81,7 +97,7 @@ export const ModTab: React.FC<ModTabProps> = ({ preset, onLFOChange, onWalkChang
     <div className="space-y-6 pb-2">
       <section className="space-y-4">
         <h2 className="text-xs font-semibold tracking-wider text-[#808090] uppercase">
-          Low Frequency Oscillators
+          Audio-Rate Low Frequency Oscillators
         </h2>
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
           {lfos.map(({ num, cfg }) => {
@@ -150,9 +166,14 @@ export const ModTab: React.FC<ModTabProps> = ({ preset, onLFOChange, onWalkChang
       <div className="h-px bg-[#222230]" />
 
       <section className="space-y-4">
-        <h2 className="text-xs font-semibold tracking-wider text-[#808090] uppercase">
-          Autonomous Random Walks
-        </h2>
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <h2 className="text-xs font-semibold tracking-wider text-[#808090] uppercase">
+            Stochastic Random Walks
+          </h2>
+          <span className="text-xs text-[#808090]">
+            JS interval drift timers with AudioParam smoothing
+          </span>
+        </div>
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
           {walks.map(({ num, cfg }) => {
             const bounds = getWalkRangeBounds(cfg.target);
@@ -222,8 +243,8 @@ export const ModTab: React.FC<ModTabProps> = ({ preset, onLFOChange, onWalkChang
                 <TouchSlider
                   label="Interval"
                   value={cfg.interval}
-                  min={50}
-                  max={800}
+                  min={60}
+                  max={1000}
                   step={10}
                   unit="ms"
                   onChange={(v) => onWalkChange(num, { ...cfg, interval: Math.round(v) })}

@@ -1,11 +1,14 @@
 import { RefreshCw } from 'lucide-react';
 import React, { useState } from 'react';
-import type { FilterType, Preset } from '../../echo-engine/types';
+import { getSoundscapeProfile, PROFILE_LIST } from '../../echo-engine/profiles';
+import type { FilterType, Preset, SoundscapeProfileId } from '../../echo-engine/types';
 import { SegmentedControl } from '../SegmentedControl';
 import { TouchSlider } from '../TouchSlider';
 
 interface GenTabProps {
   preset: Preset;
+  activeProfile: SoundscapeProfileId;
+  onProfileChange: (profile: SoundscapeProfileId) => void;
   onVolumeChange: (val: number) => void;
   onAtmosphereChange: (key: 'tension' | 'instability' | 'complexity', val: number) => void;
   onParamChange: (path: string, val: number) => void;
@@ -25,6 +28,8 @@ const FILTER_OPTIONS: { value: FilterType; label: string }[] = [
 
 export const GenTab: React.FC<GenTabProps> = ({
   preset,
+  activeProfile,
+  onProfileChange,
   onVolumeChange,
   onAtmosphereChange,
   onParamChange,
@@ -48,8 +53,43 @@ export const GenTab: React.FC<GenTabProps> = ({
     }
   };
 
+  const currentProfile = getSoundscapeProfile(activeProfile);
+  const synth = preset.synthesis ?? currentProfile.defaults;
+
   return (
     <div className="space-y-6">
+      {/* Soundscape Profile Hierarchy Selector */}
+      <section className="space-y-2.5">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <h2 className="text-xs font-semibold tracking-wider text-[#808090] uppercase">
+            Soundscape Profile
+          </h2>
+          <span className="text-xs text-[#808090]">{currentProfile.subtitle}</span>
+        </div>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          {PROFILE_LIST.map((p) => {
+            const active = p.id === activeProfile;
+            return (
+              <button
+                key={p.id}
+                type="button"
+                aria-pressed={active}
+                onClick={() => onProfileChange(p.id)}
+                className={`min-h-[44px] rounded-lg border px-3 py-2 text-left transition-colors ${
+                  active
+                    ? 'border-[#ff8c00] bg-[#ff8c00]/15 text-[#ffaa33]'
+                    : 'border-[#222230] bg-[#141419] text-[#e0e0e6] hover:border-[#ff8c00]/50'
+                }`}
+              >
+                <div className="text-sm font-semibold">{p.label}</div>
+              </button>
+            );
+          })}
+        </div>
+      </section>
+
+      <div className="h-px bg-[#222230]" />
+
       <section className="space-y-1">
         <h2 className="text-xs font-semibold tracking-wider text-[#808090] uppercase">
           Atmosphere &amp; Master
@@ -70,7 +110,13 @@ export const GenTab: React.FC<GenTabProps> = ({
             min={-1}
             max={1}
             step={0.01}
-            formatValue={(v) => (v === 0 ? 'Center' : v < 0 ? `L ${Math.abs(Math.round(v * 100))}%` : `R ${Math.round(v * 100)}%`)}
+            formatValue={(v) =>
+              v === 0
+                ? 'Center'
+                : v < 0
+                  ? `L ${Math.abs(Math.round(v * 100))}%`
+                  : `R ${Math.round(v * 100)}%`
+            }
             onChange={(v) => onParamChange('panner.pan', v)}
           />
           <TouchSlider
@@ -107,7 +153,7 @@ export const GenTab: React.FC<GenTabProps> = ({
 
       <section className="space-y-2">
         <h2 className="text-xs font-semibold tracking-wider text-[#808090] uppercase">
-          Main Filter
+          Main Filter &amp; Saturation
         </h2>
         <SegmentedControl
           label="Filter Type"
@@ -133,6 +179,24 @@ export const GenTab: React.FC<GenTabProps> = ({
             step={0.1}
             onChange={(v) => onParamChange('filter.Q', v)}
           />
+          <TouchSlider
+            label="Saturation Drive"
+            value={synth.drive}
+            min={0}
+            max={1}
+            step={0.01}
+            formatValue={(v) => `${Math.round(v * 100)}%`}
+            onChange={(v) => onParamChange('synthesis.drive', v)}
+          />
+          <TouchSlider
+            label="Bit Crush"
+            value={synth.crush}
+            min={0}
+            max={1}
+            step={0.01}
+            formatValue={(v) => `${Math.round(v * 100)}%`}
+            onChange={(v) => onParamChange('synthesis.crush', v)}
+          />
         </div>
       </section>
 
@@ -141,7 +205,7 @@ export const GenTab: React.FC<GenTabProps> = ({
       <section className="space-y-2">
         <div className="flex items-center justify-between gap-4">
           <h2 className="text-xs font-semibold tracking-wider text-[#808090] uppercase">
-            Delay &amp; Reverb Effects
+            Damped Delay &amp; Cavern Reverb
           </h2>
           <button
             type="button"
@@ -161,7 +225,7 @@ export const GenTab: React.FC<GenTabProps> = ({
           <TouchSlider
             label="Delay Time"
             value={preset.effects.delay.time}
-            min={0.01}
+            min={0.02}
             max={2.0}
             step={0.01}
             unit="s"
@@ -171,7 +235,7 @@ export const GenTab: React.FC<GenTabProps> = ({
             label="Delay Feedback"
             value={preset.effects.delay.feedback}
             min={0}
-            max={0.95}
+            max={0.92}
             step={0.01}
             formatValue={(v) => `${Math.round(v * 100)}%`}
             onChange={(v) => onParamChange('delay.feedback', v)}
@@ -186,6 +250,15 @@ export const GenTab: React.FC<GenTabProps> = ({
             onChange={(v) => onParamChange('delay.mix', v)}
           />
           <TouchSlider
+            label="Delay Low-Pass Damping"
+            value={preset.effects.delay.damping ?? currentProfile.delayDampingHz}
+            min={300}
+            max={5000}
+            step={20}
+            unit="Hz"
+            onChange={(v) => onParamChange('delay.damping', v)}
+          />
+          <TouchSlider
             label="Reverb Mix"
             value={preset.effects.reverb.mix}
             min={0}
@@ -198,7 +271,7 @@ export const GenTab: React.FC<GenTabProps> = ({
             label="Reverb Decay"
             value={preset.effects.reverb.decay}
             min={0.5}
-            max={5.0}
+            max={5.5}
             step={0.1}
             unit="s"
             onChange={(v) => onParamChange('reverb.decay', v)}

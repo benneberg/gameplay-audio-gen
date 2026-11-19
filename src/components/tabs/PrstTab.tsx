@@ -1,5 +1,6 @@
 import { Download, Link2, Save, Trash2, Upload } from 'lucide-react';
 import React, { useRef, useState } from 'react';
+import { getSoundscapeProfile } from '../../echo-engine/profiles';
 import type { Preset } from '../../echo-engine/types';
 
 interface PrstTabProps {
@@ -47,7 +48,7 @@ export const PrstTab: React.FC<PrstTabProps> = ({
     <div className="space-y-6 pb-2">
       <section className="space-y-2">
         <h2 className="text-xs font-semibold tracking-wider text-[#808090] uppercase">
-          Save Current State
+          Save Current Soundscape
         </h2>
         <form onSubmit={handleSave} className="flex items-center gap-2">
           <input
@@ -55,7 +56,7 @@ export const PrstTab: React.FC<PrstTabProps> = ({
             value={nameInput}
             maxLength={50}
             onChange={(e) => setNameInput(e.target.value)}
-            placeholder="Preset name (e.g. Dark Machine)"
+            placeholder="Preset name (e.g. Abyssal Reactor)"
             aria-label="New preset name"
             className="min-h-[44px] flex-1 rounded-lg border border-[#222230] bg-[#141419] px-3 text-sm text-[#e0e0e6] placeholder:text-[#808090] focus:border-[#ff8c00] focus:outline-none"
           />
@@ -125,6 +126,7 @@ export const PrstTab: React.FC<PrstTabProps> = ({
           <div className="grid grid-cols-1 gap-2.5 lg:grid-cols-2">
             {savedPresets.map((p) => {
               const isActive = p.name === activePresetName;
+              const profileLabel = getSoundscapeProfile(p.profile).label;
               return (
                 <div
                   key={p.name}
@@ -137,7 +139,7 @@ export const PrstTab: React.FC<PrstTabProps> = ({
                   <div className="min-w-0">
                     <div className="truncate text-sm font-semibold text-[#e0e0e6]">{p.name}</div>
                     <div className="font-mono-tabular text-xs text-[#808090]">
-                      Seed {p.seed} · {Math.round(p.atmosphere.tension * 100)}% tension
+                      {profileLabel} · Seed {p.seed}
                     </div>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
@@ -166,11 +168,12 @@ export const PrstTab: React.FC<PrstTabProps> = ({
 
       <section className="space-y-2.5">
         <h2 className="text-xs font-semibold tracking-wider text-[#808090] uppercase">
-          Built-In Library
+          Factory Soundscapes
         </h2>
         <div className="grid grid-cols-1 gap-2.5 lg:grid-cols-2">
           {builtInPresets.map((p) => {
             const isActive = p.name === activePresetName;
+            const profileLabel = getSoundscapeProfile(p.profile).label;
             return (
               <div
                 key={p.name}
@@ -183,7 +186,7 @@ export const PrstTab: React.FC<PrstTabProps> = ({
                 <div className="min-w-0">
                   <div className="truncate text-sm font-semibold text-[#e0e0e6]">{p.name}</div>
                   <div className="truncate text-xs text-[#808090]">
-                    {p.description || `Seed ${p.seed}`}
+                    {profileLabel} · {p.description || `Seed ${p.seed}`}
                   </div>
                 </div>
                 <button

@@ -1,3 +1,4 @@
+import { getSoundscapeProfile } from '../profiles';
 import type {
   FilterType,
   ModulationTarget,
@@ -5,13 +6,15 @@ import type {
   NoiseType,
   OscillatorWaveform,
   Preset,
+  SoundscapeProfileId,
 } from '../types';
 import { BUILT_IN_PRESETS } from './defaults';
 
 const STORAGE_PREFIX = 'echo-preset-';
 
+const VALID_PROFILES: SoundscapeProfileId[] = ['abyss', 'void', 'dissonance', 'machine'];
 const VALID_WAVEFORMS: OscillatorWaveform[] = ['sine', 'triangle', 'sawtooth', 'square'];
-const VALID_NOISE_TYPES: NoiseType[] = ['white', 'pink'];
+const VALID_NOISE_TYPES: NoiseType[] = ['white', 'pink', 'brown'];
 const VALID_NOISE_FILTERS: NoiseFilterType[] = ['lowpass', 'bandpass', 'highpass'];
 const VALID_FILTER_TYPES: FilterType[] = ['lowpass', 'highpass', 'bandpass', 'notch', 'peaking'];
 const VALID_TARGETS: ModulationTarget[] = [
@@ -28,6 +31,7 @@ const VALID_TARGETS: ModulationTarget[] = [
   'filter.Q',
   'noise.gain',
   'noise.filterFrequency',
+  'fm.depth',
   'delay.time',
   'delay.feedback',
   'delay.mix',
@@ -54,15 +58,19 @@ export function validateAndNormalizePreset(raw: unknown): Preset {
   }
 
   const obj = raw as Record<string, unknown>;
-  const version = typeof obj.version === 'string' ? obj.version : '1.0';
-  const major = parseInt(version.split('.')[0] || '1', 10);
-  if (!Number.isFinite(major) || major !== 1) {
+  const version = typeof obj.version === 'string' ? obj.version : '2.0';
+  const major = parseInt(version.split('.')[0] || '2', 10);
+  if (!Number.isFinite(major) || (major !== 1 && major !== 2)) {
     throw new Error(`Unsupported preset major version: ${version}`);
   }
 
   const base = BUILT_IN_PRESETS[0];
+  const profileId = pick(obj.profile, VALID_PROFILES, base.profile ?? 'abyss');
+  const profile = getSoundscapeProfile(profileId);
+
   const sources = (obj.sources as Record<string, unknown>) || {};
   const filter = (obj.filter as Record<string, unknown>) || {};
+  const synth = (obj.synthesis as Record<string, unknown>) || {};
   const mod = (obj.modulation as Record<string, unknown>) || {};
   const fx = (obj.effects as Record<string, unknown>) || {};
   const delay = (fx.delay as Record<string, unknown>) || {};
@@ -86,7 +94,7 @@ export function validateAndNormalizePreset(raw: unknown): Preset {
     const l = (rawLfo as Record<string, unknown>) || {};
     return {
       waveform: pick(l.waveform, VALID_WAVEFORMS, def.waveform),
-      rate: clamp(l.rate, 0.01, 20, def.rate),
+      rate: clamp(l.rate, 0.005, 20, def.rate),
       depth: clamp(l.depth, 0, 5000, def.depth),
       target: pick(l.target, VALID_TARGETS, def.target),
     };
@@ -101,17 +109,20 @@ export function validateAndNormalizePreset(raw: unknown): Preset {
       min: Math.min(min, max),
       max: Math.max(min, max),
       stepSize: clamp(w.stepSize, 0.01, 500, def.stepSize),
-      interval: Math.round(clamp(w.interval, 50, 1000, def.interval)),
+      interval: Math.round(clamp(w.interval, 60, 1200, def.interval)),
       smoothing: clamp(w.smoothing, 0.01, 1.0, def.smoothing),
     };
   };
 
+  const synthDefaults = base.synthesis ?? profile.defaults;
+
   return {
     version,
     name: typeof obj.name === 'string' && obj.name.trim() ? obj.name.trim().slice(0, 60) : 'Imported Preset',
+    profile: profileId,
     seed:
       typeof obj.seed === 'number' && Number.isFinite(obj.seed)
-        ? Math.floor(Math.abs(obj.seed))
+        ? Math.floor(Math.abs(obj.seed)) || 1
         : base.seed,
     description: typeof obj.description === 'string' ? obj.description : undefined,
     author: typeof obj.author === 'string' ? obj.author : undefined,
@@ -125,12 +136,28 @@ export function validateAndNormalizePreset(raw: unknown): Preset {
         gain: clamp(rawNoise.gain, 0, 1, base.sources.noise.gain),
         filterType: pick(rawNoise.filterType, VALID_NOISE_FILTERS, base.sources.noise.filterType),
         filterFrequency: clamp(rawNoise.filterFrequency, 50, 8000, base.sources.noise.filterFrequency),
+        filterQ: clamp(rawNoise.filterQ, 0.5, 24, base.sources.noise.filterQ ?? 4.5),
+        formantFreq: clamp(rawNoise.formantFreq, 180, 3500, base.sources.noise.formantFreq ?? 650),
+        formantQ: clamp(rawNoise.formantQ, 1, 24, base.sources.noise.formantQ ?? 8),
+        formantLevel: clamp(rawNoise.formantLevel, 0, 1, base.sources.noise.formantLevel ?? 0.14),
       },
     },
     filter: {
       type: pick(filter.type, VALID_FILTER_TYPES, base.filter.type),
       frequency: clamp(filter.frequency, 20, 12000, base.filter.frequency),
       Q: clamp(filter.Q, 0.1, 40, base.filter.Q),
+    },
+    synthesis: {
+      subLevel: clamp(synth.subLevel, 0, 1, synthDefaults.subLevel),
+      fmRatio: clamp(synth.fmRatio, 0.25, 4.5, synthDefaults.fmRatio),
+      fmDepth: clamp(synth.fmDepth, 0, 260, synthDefaults.fmDepth),
+      fmFeedback: clamp(synth.fmFeedback, 0, 1, synthDefaults.fmFeedback),
+      ringFreq: clamp(synth.ringFreq, 0.2, 500, synthDefaults.ringFreq),
+      ringMix: clamp(synth.ringMix, 0, 1, synthDefaults.ringMix),
+      drive: clamp(synth.drive, 0, 1, synthDefaults.drive),
+      crush: clamp(synth.crush, 0, 1, synthDefaults.crush),
+      shepardMix: clamp(synth.shepardMix, 0, 1, synthDefaults.shepardMix),
+      shepardRate: clamp(synth.shepardRate, 0.015, 0.25, synthDefaults.shepardRate),
     },
     modulation: {
       lfo1: normLFO(mod.lfo1, base.modulation.lfo1),
@@ -142,14 +169,15 @@ export function validateAndNormalizePreset(raw: unknown): Preset {
     },
     effects: {
       delay: {
-        time: clamp(delay.time, 0.01, 2.0, base.effects.delay.time),
-        feedback: clamp(delay.feedback, 0, 0.95, base.effects.delay.feedback),
+        time: clamp(delay.time, 0.01, 2.5, base.effects.delay.time),
+        feedback: clamp(delay.feedback, 0, 0.92, base.effects.delay.feedback),
         mix: clamp(delay.mix, 0, 1, base.effects.delay.mix),
+        damping: clamp(delay.damping, 300, 6000, base.effects.delay.damping ?? profile.delayDampingHz),
       },
       reverb: {
         enabled: typeof reverb.enabled === 'boolean' ? reverb.enabled : base.effects.reverb.enabled,
         mix: clamp(reverb.mix, 0, 1, base.effects.reverb.mix),
-        decay: clamp(reverb.decay, 0.5, 5.0, base.effects.reverb.decay),
+        decay: clamp(reverb.decay, 0.5, 6.0, base.effects.reverb.decay),
       },
     },
     atmosphere: {

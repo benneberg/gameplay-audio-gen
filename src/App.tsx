@@ -2,7 +2,9 @@ import {
   AudioWaveform,
   Dices,
   Gamepad2,
+  Piano,
   Play,
+  RotateCw,
   Save,
   Sliders,
   Square,
@@ -10,34 +12,45 @@ import {
   WifiOff,
 } from 'lucide-react';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { EchoEngine } from './echo-engine/echo-engine';
-import { PresetManager } from './echo-engine/presets/preset-manager';
-import type { EventName, LFOConfig, Preset, RandomWalkConfig } from './echo-engine/types';
 import { PWAInstallButton } from './components/PWAInstallButton';
 import { Visualizer } from './components/Visualizer';
 import { EvtTab } from './components/tabs/EvtTab';
 import { GenTab } from './components/tabs/GenTab';
+import { KeysTab } from './components/tabs/KeysTab';
 import { ModTab } from './components/tabs/ModTab';
 import { PrstTab } from './components/tabs/PrstTab';
 import { SrcTab } from './components/tabs/SrcTab';
+import { EchoEngine } from './echo-engine/echo-engine';
+import { PresetManager } from './echo-engine/presets/preset-manager';
+import { getSoundscapeProfile } from './echo-engine/profiles';
+import type {
+  EventName,
+  GameplayState,
+  LFOConfig,
+  Preset,
+  RandomWalkConfig,
+  SoundscapeProfileId,
+} from './echo-engine/types';
 import { useOnlineStatus } from './hooks/usePWAInstall';
 
-type TabId = 'gen' | 'mod' | 'src' | 'evt' | 'prst';
+type TabId = 'gen' | 'mod' | 'src' | 'evt' | 'keys' | 'prst';
 
 const TABS: { id: TabId; label: string; icon: React.FC<{ className?: string }> }[] = [
   { id: 'gen', label: 'GEN', icon: Sliders },
   { id: 'mod', label: 'MOD', icon: AudioWaveform },
   { id: 'src', label: 'SRC', icon: Volume2 },
   { id: 'evt', label: 'EVT', icon: Gamepad2 },
+  { id: 'keys', label: 'KEYS', icon: Piano },
   { id: 'prst', label: 'PRST', icon: Save },
 ];
 
 function createInitialEngine(): EchoEngine {
   const hashPreset = typeof window !== 'undefined' ? PresetManager.decodePresetFromHash() : null;
   return new EchoEngine({
-    seed: hashPreset?.seed ?? 42,
+    seed: hashPreset?.seed ?? 1012,
+    profile: hashPreset?.profile ?? 'abyss',
     preset: hashPreset ?? undefined,
-    volume: hashPreset?.master.gain ?? 0.7,
+    volume: hashPreset?.master.gain ?? 0.72,
   });
 }
 
@@ -53,18 +66,19 @@ export default function App() {
   const isOnline = useOnlineStatus();
   const [unlocked, setUnlocked] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [needsResume, setNeedsResume] = useState(false);
   const [analyser, setAnalyser] = useState<AnalyserNode | null>(null);
   const [activeTab, setActiveTab] = useState<TabId>('gen');
   const [presetState, setPresetState] = useState<Preset>(() => getEngine().getPreset());
+  const [activeProfile, setActiveProfile] = useState<SoundscapeProfileId>(() =>
+    getEngine().getProfile()
+  );
   const [savedPresets, setSavedPresets] = useState<Preset[]>(() =>
     typeof window !== 'undefined' ? PresetManager.loadAllFromStorage() : []
   );
-  const [gameStates, setGameStates] = useState<Record<string, number>>(() => ({
-    progress: 0,
-    proximity: 0,
-    danger: 0,
-    tension: getEngine().getPreset().atmosphere.tension,
-  }));
+  const [gameplayState, setGameplayState] = useState<GameplayState>(() =>
+    getEngine().getGameplayState()
+  );
   const [toast, setToast] = useState<string | null>(null);
   const toastTimerRef = useRef<number | null>(null);
 
@@ -80,20 +94,33 @@ export default function App() {
     }, 2400);
   }, []);
 
-  useEffect(() => {
+  const syncAllFromEngine = useCallback(() => {
     const current = getEngine();
     setPresetState(current.getPreset());
+    setActiveProfile(current.getProfile());
+    setGameplayState(current.getGameplayState());
+  }, [getEngine]);
+
+  useEffect(() => {
+    const current = getEngine();
+    syncAllFromEngine();
 
     const unsubscribe = current.onEvent((eventName) => {
       if (eventName === 'started') {
         setIsPlaying(true);
+        setNeedsResume(false);
         setAnalyser(current.getAnalyser());
       } else if (eventName === 'stopped') {
         setIsPlaying(false);
-      } else if (eventName === 'presetLoaded' || eventName === 'seedChanged') {
-        const nextPreset = current.getPreset();
-        setPresetState(nextPreset);
-        setGameStates((prev) => ({ ...prev, tension: nextPreset.atmosphere.tension }));
+      } else if (eventName === 'resumeRequired') {
+        setIsPlaying(false);
+        setNeedsResume(true);
+      } else if (
+        eventName === 'presetLoaded' ||
+        eventName === 'seedChanged' ||
+        eventName === 'profileChanged'
+      ) {
+        syncAllFromEngine();
       }
     });
 
@@ -105,11 +132,7 @@ export default function App() {
       unsubscribe();
       current.destroy();
     };
-  }, [getEngine, showToast]);
-
-  const syncState = useCallback(() => {
-    setPresetState(getEngine().getPreset());
-  }, [getEngine]);
+  }, [getEngine, showToast, syncAllFromEngine]);
 
   const handleUnlockAndStart = useCallback(async () => {
     const current = getEngine();
@@ -117,10 +140,12 @@ export default function App() {
       await current.start();
       setUnlocked(true);
       setIsPlaying(true);
+      setNeedsResume(false);
       setAnalyser(current.getAnalyser());
     } catch {
       setUnlocked(true);
-      showToast('Tap Play to start audio');
+      setNeedsResume(true);
+      showToast('Tap Resume or Play to start audio');
     }
   }, [getEngine, showToast]);
 
@@ -130,28 +155,34 @@ export default function App() {
       await current.start();
       setUnlocked(true);
       setIsPlaying(true);
+      setNeedsResume(false);
       setAnalyser(current.getAnalyser());
     } catch {
-      showToast('Unable to start Web Audio');
+      setNeedsResume(true);
+      showToast('Browser blocked audio — tap Resume');
     }
   }, [getEngine, showToast]);
 
   const handleStop = useCallback(() => {
     getEngine().stop();
     setIsPlaying(false);
+    setNeedsResume(false);
   }, [getEngine]);
 
   const handleNewSeed = useCallback(() => {
     const nextSeed = getEngine().reseed(undefined, true);
-    syncState();
+    syncAllFromEngine();
     showToast(`Seed ${nextSeed} generated`);
-  }, [getEngine, showToast, syncState]);
+  }, [getEngine, showToast, syncAllFromEngine]);
 
   // Desktop keyboard shortcuts
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
-      if (target && (target.tagName === 'INPUT' || target.tagName === 'SELECT' || target.tagName === 'TEXTAREA')) {
+      if (
+        target &&
+        (target.tagName === 'INPUT' || target.tagName === 'SELECT' || target.tagName === 'TEXTAREA')
+      ) {
         return;
       }
       if (e.code === 'Space') {
@@ -160,7 +191,7 @@ export default function App() {
         else void handlePlay();
       } else if (e.key === 'r' || e.key === 'R') {
         handleNewSeed();
-      } else if (e.key >= '1' && e.key <= '5') {
+      } else if (e.key >= '1' && e.key <= '6') {
         const idx = parseInt(e.key, 10) - 1;
         if (TABS[idx]) setActiveTab(TABS[idx].id);
       }
@@ -169,53 +200,61 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [getEngine, handleNewSeed, handlePlay, handleStop]);
 
+  const handleProfileChange = (profileId: SoundscapeProfileId) => {
+    getEngine().setProfile(profileId);
+    syncAllFromEngine();
+    showToast(`Profile: ${getSoundscapeProfile(profileId).label}`);
+  };
+
   const handleVolumeChange = (val: number) => {
     getEngine().setVolume(val);
-    syncState();
+    syncAllFromEngine();
   };
 
   const handleAtmosphereChange = (key: 'tension' | 'instability' | 'complexity', val: number) => {
     const current = getEngine();
-    if (key === 'tension') {
-      current.setTension(val);
-      setGameStates((prev) => ({ ...prev, tension: val }));
-    } else if (key === 'instability') {
-      current.setInstability(val);
-    } else {
-      current.setComplexity(val);
-    }
-    syncState();
+    if (key === 'tension') current.setTension(val);
+    else if (key === 'instability') current.setInstability(val);
+    else current.setComplexity(val);
+    syncAllFromEngine();
+  };
+
+  const handleXYChange = (tension: number, instability: number) => {
+    const current = getEngine();
+    current.setState('tension', tension);
+    current.setState('instability', instability);
+    syncAllFromEngine();
   };
 
   const handleParamChange = (path: string, val: number) => {
     getEngine().setParam(path, val);
-    syncState();
+    syncAllFromEngine();
   };
 
   const handleParamTypeChange = (path: string, type: string) => {
     getEngine().setParamType(path, type);
-    syncState();
+    syncAllFromEngine();
   };
 
   const handleReverbEnabledChange = (enabled: boolean) => {
     getEngine().setReverbEnabled(enabled);
-    syncState();
+    syncAllFromEngine();
   };
 
   const handleSeedApply = (seed: number) => {
     getEngine().reseed(seed, true);
-    syncState();
+    syncAllFromEngine();
     showToast(`Seed set to ${seed}`);
   };
 
   const handleLFOChange = (lfoNum: 1 | 2 | 3, next: LFOConfig) => {
     getEngine().configureLFO(lfoNum, next);
-    syncState();
+    syncAllFromEngine();
   };
 
   const handleWalkChange = (walkNum: 0 | 1 | 2, next: RandomWalkConfig) => {
     getEngine().configureRandomWalk(walkNum, next);
-    syncState();
+    syncAllFromEngine();
   };
 
   const handleTriggerEvent = (name: EventName, intensity: number) => {
@@ -223,32 +262,31 @@ export default function App() {
     if (!current.isRunning()) {
       void handlePlay().then(() => {
         getEngine().triggerEvent(name, { intensity });
-        syncState();
+        syncAllFromEngine();
       });
     } else {
       current.triggerEvent(name, { intensity });
-      syncState();
+      syncAllFromEngine();
     }
     showToast(`Event: ${name}`);
   };
 
-  const handleGameStateChange = (key: string, value: number) => {
-    setGameStates((prev) => ({ ...prev, [key]: value }));
+  const handleGameStateChange = (key: keyof GameplayState, value: number) => {
     getEngine().setState(key, value);
-    syncState();
+    syncAllFromEngine();
   };
 
   const handleSavePreset = (name: string) => {
     const preset = getEngine().savePreset(name);
     PresetManager.saveToStorage(preset);
     setSavedPresets(PresetManager.loadAllFromStorage());
-    syncState();
+    syncAllFromEngine();
     showToast(`Saved "${preset.name}"`);
   };
 
   const handleLoadPreset = (preset: Preset) => {
     getEngine().loadPreset(preset);
-    syncState();
+    syncAllFromEngine();
     showToast(`Loaded "${preset.name}"`);
   };
 
@@ -270,7 +308,7 @@ export default function App() {
       PresetManager.saveToStorage(preset);
       setSavedPresets(PresetManager.loadAllFromStorage());
       getEngine().loadPreset(preset);
-      syncState();
+      syncAllFromEngine();
       showToast(`Imported "${preset.name}"`);
     } catch {
       showToast('Invalid preset JSON file');
@@ -289,6 +327,8 @@ export default function App() {
       showToast('Share URL updated in address bar');
     }
   };
+
+  const profileMeta = getSoundscapeProfile(activeProfile);
 
   return (
     <div className="flex h-[100dvh] w-full flex-col overflow-hidden bg-[#0a0a0f] text-[#e0e0e6] pb-[var(--safe-bottom)]">
@@ -309,7 +349,7 @@ export default function App() {
                 Echo Engine Sound Lab
               </h1>
               <p className="text-sm text-[#808090]">
-                Procedural Web Audio synthesizer for evolving atmospheric soundscapes.
+                Procedural Web Audio synthesizer for dark atmospheric soundscapes.
               </p>
             </div>
             <button
@@ -324,16 +364,20 @@ export default function App() {
         </div>
       )}
 
-      {/* Top Bar (52px compact height, 3 clean zones) */}
-      <header className="flex h-[52px] shrink-0 items-center justify-between gap-4 border-b border-[#222230] bg-[#141419] px-4 lg:px-6">
+      {/* Top Bar */}
+      <header className="flex h-[52px] shrink-0 items-center justify-between gap-3 border-b border-[#222230] bg-[#141419] px-4 lg:px-6">
         <span className="text-base font-bold tracking-tight text-[#e0e0e6] whitespace-nowrap shrink-0">
           ECHO LAB
         </span>
 
         <div className="font-mono-tabular flex items-center gap-2 text-xs text-[#808090] whitespace-nowrap shrink-0">
-          <span>Seed {presetState.seed}</span>
+          <span className="text-[#ffaa33]">{profileMeta.label}</span>
           <span aria-hidden="true">·</span>
-          <span className="hidden sm:inline truncate max-w-[160px]">{presetState.name}</span>
+          <span>Seed {presetState.seed}</span>
+          <span className="hidden sm:inline" aria-hidden="true">
+            ·
+          </span>
+          <span className="hidden sm:inline truncate max-w-[150px]">{presetState.name}</span>
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
@@ -347,7 +391,24 @@ export default function App() {
         </div>
       </header>
 
-      {/* Main Responsive Workspace: Mobile Portrait Column <-> Tablet/Desktop Multi-Column */}
+      {/* Recoverable Audio Gesture Banner (after browser suspends background audio) */}
+      {needsResume && unlocked && (
+        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-[#ff8c00]/50 bg-[#ff8c00]/15 px-4 py-2 text-xs">
+          <span className="font-medium text-[#ffaa33]">
+            Audio paused by browser autoplay policy after returning to page.
+          </span>
+          <button
+            type="button"
+            onClick={() => void handlePlay()}
+            className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg bg-[#ff8c00] px-3 font-semibold text-[#0a0a0f] hover:bg-[#ffaa33] whitespace-nowrap shrink-0"
+          >
+            <RotateCw className="h-3.5 w-3.5" aria-hidden="true" />
+            <span>Tap to Resume</span>
+          </button>
+        </div>
+      )}
+
+      {/* Main Responsive Workspace */}
       <div className="flex min-h-0 flex-1 flex-col md:flex-row">
         {/* Tablet / Desktop Left Sidebar Navigation */}
         <aside className="hidden md:flex md:w-20 lg:w-48 shrink-0 flex-col border-r border-[#222230] bg-[#141419] p-2 lg:p-3">
@@ -376,15 +437,15 @@ export default function App() {
           <div className="mt-auto hidden lg:block space-y-1 border-t border-[#222230] pt-3 text-[11px] text-[#808090]">
             <div>Space: Play / Stop</div>
             <div>R: New Seed</div>
-            <div>1–5: Switch Tab</div>
+            <div>1–6: Switch Tab</div>
           </div>
         </aside>
 
-        {/* Center / Top Visualizer + Status + Transport */}
+        {/* Visualizer + Transport + Tab Workspace */}
         <div className="flex min-h-0 flex-1 flex-col lg:grid lg:grid-cols-12">
           <section className="flex shrink-0 flex-col border-b border-[#222230] lg:col-span-5 lg:border-r lg:border-b-0">
             {/* Visualizer */}
-            <div className="h-[20vh] min-h-[132px] max-h-[220px] lg:h-[280px] lg:max-h-none w-full border-b border-[#222230]">
+            <div className="h-[18vh] min-h-[120px] max-h-[210px] lg:h-[260px] lg:max-h-none w-full border-b border-[#222230]">
               <Visualizer analyser={analyser} isPlaying={isPlaying} />
             </div>
 
@@ -394,11 +455,19 @@ export default function App() {
                 <span
                   aria-hidden="true"
                   className={`h-2 w-2 rounded-full ${
-                    isPlaying ? 'bg-[#00ff88]' : 'bg-[#808090]'
+                    isPlaying ? 'bg-[#00ff88]' : needsResume ? 'bg-[#ff8c00]' : 'bg-[#808090]'
                   }`}
                 />
-                <span className={isPlaying ? 'font-semibold text-[#00ff88]' : 'text-[#808090]'}>
-                  {isPlaying ? 'PLAYING' : 'STOPPED'}
+                <span
+                  className={
+                    isPlaying
+                      ? 'font-semibold text-[#00ff88]'
+                      : needsResume
+                        ? 'font-semibold text-[#ffaa33]'
+                        : 'text-[#808090]'
+                  }
+                >
+                  {isPlaying ? 'PLAYING' : needsResume ? 'RESUME REQUIRED' : 'STOPPED'}
                 </span>
               </div>
               <div className="font-mono-tabular text-[#e0e0e6]">
@@ -419,13 +488,13 @@ export default function App() {
                 }`}
               >
                 <Play className="h-4 w-4 fill-current" aria-hidden="true" />
-                <span>Play</span>
+                <span>{needsResume ? 'Resume' : 'Play'}</span>
               </button>
 
               <button
                 type="button"
                 onClick={handleStop}
-                disabled={!isPlaying}
+                disabled={!isPlaying && !needsResume}
                 className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg border border-[#ff3344]/60 bg-[#1c1c24] text-sm font-semibold text-[#ff3344] transition-colors hover:bg-[#ff3344] hover:text-[#0a0a0f] disabled:opacity-40 whitespace-nowrap"
               >
                 <Square className="h-4 w-4 fill-current" aria-hidden="true" />
@@ -447,6 +516,12 @@ export default function App() {
               <div className="space-y-2">
                 <div className="font-semibold text-[#e0e0e6]">Active Patch Snapshot</div>
                 <div className="font-mono-tabular flex justify-between border-b border-[#222230] pb-1.5">
+                  <span>Profile · Preset</span>
+                  <span className="text-[#e0e0e6]">
+                    {profileMeta.label} · {presetState.name}
+                  </span>
+                </div>
+                <div className="font-mono-tabular flex justify-between border-b border-[#222230] pb-1.5">
                   <span>Oscillators</span>
                   <span className="text-[#e0e0e6]">
                     {presetState.sources.osc1.frequency} / {presetState.sources.osc2.frequency} /{' '}
@@ -463,14 +538,14 @@ export default function App() {
                 <div className="font-mono-tabular flex justify-between">
                   <span>Atmosphere</span>
                   <span className="text-[#e0e0e6]">
-                    T {Math.round(presetState.atmosphere.tension * 100)}% · I{' '}
-                    {Math.round(presetState.atmosphere.instability * 100)}% · C{' '}
-                    {Math.round(presetState.atmosphere.complexity * 100)}%
+                    T {Math.round(gameplayState.tension * 100)}% · I{' '}
+                    {Math.round(gameplayState.instability * 100)}% · C{' '}
+                    {Math.round(gameplayState.complexity * 100)}%
                   </span>
                 </div>
               </div>
               <div className="text-[11px] text-[#808090]">
-                Standalone procedural Web Audio synthesizer · Zero dependencies
+                Persistent Web Audio graph · Separate seeded PRNG streams · Zero dependencies
               </div>
             </div>
           </section>
@@ -480,6 +555,8 @@ export default function App() {
             {activeTab === 'gen' && (
               <GenTab
                 preset={presetState}
+                activeProfile={activeProfile}
+                onProfileChange={handleProfileChange}
                 onVolumeChange={handleVolumeChange}
                 onAtmosphereChange={handleAtmosphereChange}
                 onParamChange={handleParamChange}
@@ -505,9 +582,18 @@ export default function App() {
             )}
             {activeTab === 'evt' && (
               <EvtTab
-                gameStates={gameStates}
+                gameplayState={gameplayState}
                 onTriggerEvent={handleTriggerEvent}
                 onStateChange={handleGameStateChange}
+                onXYChange={handleXYChange}
+                onEnsureAudio={handlePlay}
+              />
+            )}
+            {activeTab === 'keys' && (
+              <KeysTab
+                engine={getEngine()}
+                isPlaying={isPlaying}
+                onEnsureAudio={handlePlay}
               />
             )}
             {activeTab === 'prst' && (
@@ -527,10 +613,10 @@ export default function App() {
         </div>
       </div>
 
-      {/* Mobile Bottom Navigation (56px height) */}
+      {/* Mobile Bottom Navigation (56px height, 6 tabs) */}
       <nav
         aria-label="Primary mobile tabs"
-        className="grid h-[56px] shrink-0 grid-cols-5 border-t border-[#222230] bg-[#141419] md:hidden"
+        className="grid h-[56px] shrink-0 grid-cols-6 border-t border-[#222230] bg-[#141419] md:hidden"
       >
         {TABS.map(({ id, label, icon: Icon }) => {
           const active = activeTab === id;
@@ -547,10 +633,10 @@ export default function App() {
               {active && (
                 <span
                   aria-hidden="true"
-                  className="absolute top-0 h-0.5 w-10 rounded-full bg-[#ff8c00]"
+                  className="absolute top-0 h-0.5 w-8 rounded-full bg-[#ff8c00]"
                 />
               )}
-              <Icon className="h-5 w-5" aria-hidden="true" />
+              <Icon className="h-4 w-4" aria-hidden="true" />
               <span>{label}</span>
             </button>
           );

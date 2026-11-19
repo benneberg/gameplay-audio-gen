@@ -1,7 +1,15 @@
-export type EngineState = 'idle' | 'starting' | 'playing' | 'suspended' | 'destroyed';
+export type EngineState =
+  | 'idle'
+  | 'starting'
+  | 'playing'
+  | 'suspended'
+  | 'recoverable'
+  | 'destroyed';
+
+export type SoundscapeProfileId = 'abyss' | 'void' | 'dissonance' | 'machine';
 
 export type OscillatorWaveform = 'sine' | 'triangle' | 'sawtooth' | 'square';
-export type NoiseType = 'white' | 'pink';
+export type NoiseType = 'white' | 'pink' | 'brown';
 export type NoiseFilterType = 'lowpass' | 'bandpass' | 'highpass';
 export type FilterType = 'lowpass' | 'highpass' | 'bandpass' | 'notch' | 'peaking';
 
@@ -19,6 +27,7 @@ export type ModulationTarget =
   | 'filter.Q'
   | 'noise.gain'
   | 'noise.filterFrequency'
+  | 'fm.depth'
   | 'delay.time'
   | 'delay.feedback'
   | 'delay.mix'
@@ -36,7 +45,14 @@ export type EventName =
   | 'pass'
   | 'collision'
   | 'nearMiss'
-  | 'gameOver';
+  | 'gameOver'
+  | 'whisper'
+  | 'growl'
+  | 'subDrop'
+  | 'creak'
+  | 'wail'
+  | 'lurch'
+  | 'shepardDive';
 
 export interface EventOptions {
   intensity?: number;
@@ -54,6 +70,10 @@ export interface NoiseConfig {
   gain: number;
   filterType: NoiseFilterType;
   filterFrequency: number;
+  filterQ?: number;
+  formantFreq?: number;
+  formantQ?: number;
+  formantLevel?: number;
 }
 
 export interface FilterConfig {
@@ -82,6 +102,7 @@ export interface DelayConfig {
   time: number;
   feedback: number;
   mix: number;
+  damping?: number;
 }
 
 export interface ReverbConfig {
@@ -90,16 +111,39 @@ export interface ReverbConfig {
   decay: number;
 }
 
+export interface TextureAndSynthesisConfig {
+  subLevel: number;
+  fmRatio: number;
+  fmDepth: number;
+  fmFeedback: number;
+  ringFreq: number;
+  ringMix: number;
+  drive: number;
+  crush: number;
+  shepardMix: number;
+  shepardRate: number;
+}
+
 export interface AtmosphereState {
   tension: number;
   instability: number;
   complexity: number;
 }
 
+export interface GameplayState {
+  tension: number;
+  instability: number;
+  complexity: number;
+  progress: number;
+  proximity: number;
+  danger: number;
+}
+
 export interface Preset {
   $schema?: string;
   version: string;
   name: string;
+  profile?: SoundscapeProfileId;
   seed: number;
   description?: string;
   author?: string;
@@ -111,6 +155,7 @@ export interface Preset {
     noise: NoiseConfig;
   };
   filter: FilterConfig;
+  synthesis?: TextureAndSynthesisConfig;
   modulation: {
     lfo1: LFOConfig;
     lfo2: LFOConfig;
@@ -132,6 +177,7 @@ export interface Preset {
 
 export interface EchoEngineConfig {
   seed?: number;
+  profile?: SoundscapeProfileId;
   preset?: Preset;
   volume?: number;
   autoStart?: boolean;
@@ -142,8 +188,19 @@ export type EngineEventName =
   | 'started'
   | 'stopped'
   | 'stateChange'
+  | 'resumeRequired'
   | 'eventTriggered'
   | 'presetLoaded'
+  | 'profileChanged'
   | 'seedChanged';
 
 export type EngineCallback = (eventName: EngineEventName, data: Record<string, unknown>) => void;
+
+export interface NotePlayOptions {
+  dur?: number;
+  vel?: number;
+  attack?: number;
+  release?: number;
+  detuneSpread?: number;
+  tuningScale?: number;
+}
